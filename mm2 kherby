@@ -1,0 +1,457 @@
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+
+local Window = Rayfield:CreateWindow({
+    Name = "I Love Annie - MM2",
+    LoadingTitle = "I Love Annie",
+    LoadingSubtitle = "by Kherby",
+    ConfigurationSaving = {
+        Enabled = true,
+        FolderName = "KherbyMM2",
+        FileName = "AnnieConfig"
+    },
+    KeySystem = false,
+})
+
+local Tab = Window:CreateTab("Main", 4483362458)
+
+local Players = game:GetService("Players")
+local UserInputService = game:GetService("UserInputService")
+local RunService = game:GetService("RunService")
+local Workspace = game:GetService("Workspace")
+local TweenService = game:GetService("TweenService")
+local LocalPlayer = Players.LocalPlayer
+local Camera = Workspace.CurrentCamera
+
+local ESPEnabled = false
+local GunESPEnabled = true
+local TriggerbotEnabled = false
+local AimbotEnabled = false
+local FillTransparencyValue = 0.4
+
+local HitboxEnabled = false
+local VisualizeHitbox = false
+local HitboxSize = 10
+local MinHitboxSize = 5
+local MaxHitboxSize = 50
+local HitboxStep = 5
+local BoxHandles = {}
+
+local rightClickHeld = false
+local AimbotToggle
+
+local function isMurderer(plr)
+    if not plr then return false end
+    return plr.Backpack:FindFirstChild("Knife") or (plr.Character and plr.Character:FindFirstChild("Knife"))
+end
+
+local function hasGun()
+    return LocalPlayer.Backpack:FindFirstChild("Gun") or (LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Gun"))
+end
+
+local function getMurdererHead()
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if isMurderer(plr) and plr.Character and plr.Character:FindFirstChild("Head") then
+            return plr.Character.Head
+        end
+    end
+    return nil
+end
+
+local function getRoleColor(plr)
+    if not plr or not plr.Character then return Color3.fromRGB(0, 255, 0) end
+    if isMurderer(plr) then
+        return Color3.fromRGB(255, 0, 0)
+    elseif plr.Backpack:FindFirstChild("Gun") or (plr.Character and plr.Character:FindFirstChild("Gun")) then
+        return Color3.fromRGB(0, 0, 255)
+    else
+        return Color3.fromRGB(0, 255, 0)
+    end
+end
+
+local function ApplyHitboxExpander(Character)
+    if not Character or Character == LocalPlayer.Character then return end
+    local HRP = Character:FindFirstChild("HumanoidRootPart")
+    if HRP then
+        local newSize = Vector3.new(HitboxSize, HitboxSize, HitboxSize)
+        HRP.Size = newSize
+        HRP.Transparency = 1
+        HRP.CanCollide = false
+        
+        if not BoxHandles[Character] then
+            local box = Instance.new("BoxHandleAdornment")
+            box.Adornee = HRP
+            box.Size = newSize
+            box.Color3 = Color3.fromRGB(255, 0, 0)
+            box.Transparency = 0.5
+            box.AlwaysOnTop = true
+            box.ZIndex = 10
+            box.Visible = VisualizeHitbox
+            box.Parent = HRP
+            BoxHandles[Character] = box
+        else
+            BoxHandles[Character].Size = newSize
+            BoxHandles[Character].Visible = VisualizeHitbox
+        end
+    end
+end
+
+local function UpdateAllHitboxes()
+    if not HitboxEnabled then return end
+    local newSize = Vector3.new(HitboxSize, HitboxSize, HitboxSize)
+    for _, Player in ipairs(Players:GetPlayers()) do
+        if Player == LocalPlayer or not Player.Character then continue end
+        local HRP = Player.Character:FindFirstChild("HumanoidRootPart")
+        if HRP then
+            HRP.Size = newSize
+            HRP.Transparency = 1
+            HRP.CanCollide = false
+            
+            local box = BoxHandles[Player.Character]
+            if box then
+                box.Size = newSize
+                box.Visible = VisualizeHitbox
+            end
+        end
+    end
+end
+
+local function ResetHitboxes()
+    for _, Player in ipairs(Players:GetPlayers()) do
+        if Player == LocalPlayer or not Player.Character then continue end
+        local HRP = Player.Character:FindFirstChild("HumanoidRootPart")
+        if HRP then
+            HRP.Size = Vector3.new(2, 2, 1)
+        end
+        if BoxHandles[Player.Character] then
+            BoxHandles[Player.Character]:Destroy()
+            BoxHandles[Player.Character] = nil
+        end
+    end
+end
+
+local function createHighlight(char, plr)
+    if char:FindFirstChild("MM2Highlight") then char.MM2Highlight:Destroy() end
+    local hl = Instance.new("Highlight")
+    hl.Name = "MM2Highlight"
+    hl.Adornee = char
+    hl.FillColor = getRoleColor(plr)
+    hl.OutlineColor = Color3.fromRGB(255, 255, 255)
+    hl.FillTransparency = FillTransparencyValue
+    hl.OutlineTransparency = 0
+    hl.Parent = char
+end
+
+local function destroyAllPlayerHighlights()
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer and plr.Character and plr.Character:FindFirstChild("MM2Highlight") then
+            plr.Character.MM2Highlight:Destroy()
+        end
+    end
+end
+
+local function updatePlayerHighlights()
+    if not ESPEnabled then return end
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer and plr.Character then
+            local hl = plr.Character:FindFirstChild("MM2Highlight")
+            if hl then
+                hl.FillColor = getRoleColor(plr)
+                hl.FillTransparency = FillTransparencyValue
+            end
+        end
+    end
+end
+
+local function createDroppedGunESP(gun)
+    if gun:FindFirstChild("GunDroppedESP") then return end
+    local hl = Instance.new("Highlight")
+    hl.Name = "GunDroppedESP"
+    hl.Adornee = gun
+    hl.FillColor = Color3.fromRGB(255, 215, 0)
+    hl.OutlineColor = Color3.fromRGB(255, 255, 255)
+    hl.FillTransparency = 0.3
+    hl.OutlineTransparency = 0
+    hl.Parent = gun
+
+    local bill = Instance.new("BillboardGui")
+    bill.Name = "GunLabel"
+    bill.Adornee = gun:FindFirstChild("Handle") or gun
+    bill.Size = UDim2.new(0, 120, 0, 40)
+    bill.StudsOffset = Vector3.new(0, 3, 0)
+    bill.AlwaysOnTop = true
+    bill.Parent = gun
+
+    local txt = Instance.new("TextLabel")
+    txt.Size = UDim2.new(1,0,1,0)
+    txt.BackgroundTransparency = 1
+    txt.Text = "GUN"
+    txt.TextColor3 = Color3.fromRGB(255, 215, 0)
+    txt.TextScaled = true
+    txt.Font = Enum.Font.GothamBold
+    txt.Parent = bill
+end
+
+local function refreshDroppedGunESP()
+    if not GunESPEnabled then
+        for _, obj in ipairs(Workspace:GetChildren()) do
+            if obj:FindFirstChild("GunDroppedESP") then obj.GunDroppedESP:Destroy() end
+            if obj:FindFirstChild("GunLabel") then obj.GunLabel:Destroy() end
+        end
+        return
+    end
+    for _, obj in ipairs(Workspace:GetChildren()) do
+        if obj:IsA("Tool") and obj.Name == "Gun" then
+            createDroppedGunESP(obj)
+        end
+    end
+end
+
+local triggerConn
+local function startTriggerbot()
+    if triggerConn then triggerConn:Disconnect() end
+    triggerConn = RunService.Heartbeat:Connect(function()
+        if not TriggerbotEnabled or not hasGun() then return end
+        local mouse = LocalPlayer:GetMouse()
+        if not mouse.Target then return end
+        
+        local targetPart = mouse.Target
+        local char = targetPart:FindFirstAncestorWhichIsA("Model")
+        
+        if char then
+            -- Check if the part we're hovering is a character part (not just an expanded hitbox)
+            -- Also verify the part is actually attached to a real character body part
+            local isValidTarget = false
+            for _, bodyPart in ipairs({"Head", "Torso", "UpperTorso", "LowerTorso", "LeftArm", "RightArm", "LeftLeg", "RightLeg", "HumanoidRootPart"}) do
+                if char:FindFirstChild(bodyPart) == targetPart then
+                    isValidTarget = true
+                    break
+                end
+            end
+            
+            -- Also check if it's a mesh part that belongs to the character (clothing, accessories)
+            if not isValidTarget then
+                if targetPart:IsA("MeshPart") or targetPart:IsA("Part") then
+                    if targetPart.Parent == char then
+                        isValidTarget = true
+                    end
+                end
+            end
+            
+            if isValidTarget then
+                local targetPlr = Players:GetPlayerFromCharacter(char)
+                if targetPlr and isMurderer(targetPlr) then
+                    local gun = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Gun")
+                    if gun then gun:Activate() end
+                end
+            end
+        end
+    end)
+end
+
+local aimbotConnection
+local function setupAimbot()
+    if aimbotConnection then aimbotConnection:Disconnect() end
+    aimbotConnection = RunService.RenderStepped:Connect(function()
+        if not AimbotEnabled or not rightClickHeld or not hasGun() then return end
+        local targetHead = getMurdererHead()
+        if targetHead then
+            Camera.CFrame = CFrame.lookAt(Camera.CFrame.Position, targetHead.Position + Vector3.new(0, 0.25, 0))
+        end
+    end)
+end
+
+for _, plr in ipairs(Players:GetPlayers()) do
+    if plr ~= LocalPlayer then
+        plr.CharacterAdded:Connect(function(char)
+            task.wait(0.6)
+            if ESPEnabled then createHighlight(char, plr) end
+            if HitboxEnabled then ApplyHitboxExpander(char) end
+        end)
+        
+        if plr.Character then
+            if HitboxEnabled then ApplyHitboxExpander(plr.Character) end
+        end
+    end
+end
+
+Players.PlayerAdded:Connect(function(plr)
+    if plr ~= LocalPlayer then
+        plr.CharacterAdded:Connect(function(char)
+            task.wait(0.6)
+            if ESPEnabled then createHighlight(char, plr) end
+            if HitboxEnabled then ApplyHitboxExpander(char) end
+        end)
+    end
+end)
+
+Players.PlayerRemoving:Connect(function(plr)
+    if plr.Character and BoxHandles[plr.Character] then
+        BoxHandles[plr.Character]:Destroy()
+        BoxHandles[plr.Character] = nil
+    end
+end)
+
+task.spawn(function()
+    while task.wait(0.1) do 
+        updatePlayerHighlights() 
+        if HitboxEnabled then UpdateAllHitboxes() end
+    end
+end)
+
+task.spawn(function()
+    while task.wait(0.8) do refreshDroppedGunESP() end
+end)
+
+Workspace.ChildAdded:Connect(function(child)
+    if GunESPEnabled and child:IsA("Tool") and child.Name == "Gun" then
+        task.wait(0.05)
+        createDroppedGunESP(child)
+    end
+end)
+
+UserInputService.InputBegan:Connect(function(input, gp)
+    if gp then return end
+    if input.KeyCode == Enum.KeyCode.P then
+        Rayfield:ToggleUI()
+    elseif input.KeyCode == Enum.KeyCode.Q then
+        AimbotEnabled = not AimbotEnabled
+        if AimbotToggle then AimbotToggle:Set(AimbotEnabled) end
+        Rayfield:Notify({ Title = "Aimbot", Content = AimbotEnabled and "ON" or "OFF", Duration = 2 })
+    elseif input.KeyCode == Enum.KeyCode.U then
+        VisualizeHitbox = not VisualizeHitbox
+        UpdateAllHitboxes()
+        Rayfield:Notify({ Title = "Hitbox Visuals", Content = VisualizeHitbox and "ON" or "OFF", Duration = 2 })
+    elseif input.KeyCode == Enum.KeyCode.Equals or input.KeyCode == Enum.KeyCode.Plus then
+        HitboxSize = math.min(HitboxSize + HitboxStep, MaxHitboxSize)
+        UpdateAllHitboxes()
+        Rayfield:Notify({ Title = "Hitbox Size", Content = tostring(HitboxSize), Duration = 1.5 })
+    elseif input.KeyCode == Enum.KeyCode.Minus then
+        HitboxSize = math.max(HitboxSize - HitboxStep, MinHitboxSize)
+        UpdateAllHitboxes()
+        Rayfield:Notify({ Title = "Hitbox Size", Content = tostring(HitboxSize), Duration = 1.5 })
+    elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
+        rightClickHeld = true
+    end
+end)
+
+UserInputService.InputEnded:Connect(function(input)
+    if input.UserInputType == Enum.UserInputType.MouseButton2 then
+        rightClickHeld = false
+    end
+end)
+
+Tab:CreateSection("ESP")
+
+Tab:CreateToggle({
+    Name = "ESP",
+    CurrentValue = false,
+    Callback = function(Value)
+        ESPEnabled = Value
+        if Value then
+            for _, plr in ipairs(Players:GetPlayers()) do
+                if plr ~= LocalPlayer and plr.Character then createHighlight(plr.Character, plr) end
+            end
+        else
+            destroyAllPlayerHighlights()
+        end
+    end,
+})
+
+Tab:CreateSlider({
+    Name = "Fill Transparency",
+    Range = {0, 1},
+    Increment = 0.05,
+    CurrentValue = 0.4,
+    Callback = function(Value)
+        FillTransparencyValue = Value
+        updatePlayerHighlights()
+    end,
+})
+
+Tab:CreateSection("Gun ESP")
+
+Tab:CreateToggle({
+    Name = "Gun ESP",
+    CurrentValue = true,
+    Callback = function(Value)
+        GunESPEnabled = Value
+        refreshDroppedGunESP()
+    end,
+})
+
+Tab:CreateSection("Combat")
+
+Tab:CreateToggle({
+    Name = "Triggerbot",
+    CurrentValue = false,
+    Callback = function(Value)
+        TriggerbotEnabled = Value
+        if Value then startTriggerbot() else if triggerConn then triggerConn:Disconnect() end end
+    end,
+})
+
+AimbotToggle = Tab:CreateToggle({
+    Name = "Aimbot",
+    CurrentValue = false,
+    Callback = function(Value)
+        AimbotEnabled = Value
+        Rayfield:Notify({ Title = "Aimbot", Content = Value and "ON" or "OFF", Duration = 2 })
+    end,
+})
+
+Tab:CreateLabel("Press Q baby for toggle and right click for aimlock hold mo po")
+
+Tab:CreateSection("Hitbox Expander")
+
+Tab:CreateToggle({
+    Name = "Hitbox Expander",
+    CurrentValue = false,
+    Callback = function(Value)
+        HitboxEnabled = Value
+        if Value then
+            for _, plr in ipairs(Players:GetPlayers()) do
+                if plr ~= LocalPlayer and plr.Character then
+                    ApplyHitboxExpander(plr.Character)
+                end
+            end
+            Rayfield:Notify({ Title = "Hitbox", Content = "Enabled", Duration = 2 })
+        else
+            ResetHitboxes()
+            Rayfield:Notify({ Title = "Hitbox", Content = "Disabled", Duration = 2 })
+        end
+    end,
+})
+
+Tab:CreateToggle({
+    Name = "Visualize Hitbox",
+    CurrentValue = false,
+    Callback = function(Value)
+        VisualizeHitbox = Value
+        UpdateAllHitboxes()
+    end,
+})
+
+Tab:CreateSlider({
+    Name = "Hitbox Size",
+    Range = {5, 50},
+    Increment = 5,
+    CurrentValue = 10,
+    Callback = function(Value)
+        HitboxSize = Value
+        if HitboxEnabled then
+            UpdateAllHitboxes()
+        end
+    end,
+})
+
+Tab:CreateLabel("U to toggle visual hitbox baby")
+
+Rayfield:LoadConfiguration()
+
+Rayfield:Notify({
+    Title = "I Love Annie - MM2",
+    Content = "Loaded!\nP = hide/show\nU = hitbox visuals, +/- = size",
+    Duration = 4,
+})
+
+setupAimbot()
