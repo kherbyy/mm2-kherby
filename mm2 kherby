@@ -824,6 +824,6 @@ Tab:CreateLabel("U to toggle visual hitbox")
 Rayfield:LoadConfiguration()
 Rayfield:Notify({
     Title = "I Love Annie - MM2",
-    Content = "FULL SCRIPT LOADED!\nAuto config save enabled\nNames now show above heads with role colors",
+    Content = "i love you so much baby ko",
     Duration = 6,
 })
