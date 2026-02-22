@@ -24,9 +24,13 @@ local Camera = Workspace.CurrentCamera
 
 local ESPEnabled = false
 local GunESPEnabled = true
+local DroppedGunHighlightEnabled = true
+local DroppedGunTracerEnabled = true
 local TriggerbotEnabled = false
 local AimbotEnabled = false
 local FillTransparencyValue = 0.4
+local GodModeEnabled = false
+local AntiFlingEnabled = false
 
 local HitboxEnabled = false
 local VisualizeHitbox = false
@@ -38,6 +42,134 @@ local BoxHandles = {}
 
 local rightClickHeld = false
 local AimbotToggle
+local GodModeToggle
+local AntiFlingToggle
+
+-- Tracer drawings
+local gunTracer = Drawing.new("Line")
+gunTracer.Color = Color3.fromRGB(255, 215, 0)
+gunTracer.Thickness = 2
+gunTracer.Transparency = 1
+gunTracer.Visible = false
+
+-- Anti-Fling Function
+local function setupAntiFling()
+    local character = LocalPlayer.Character
+    if not character then return end
+    
+    local humanoid = character:FindFirstChildWhichIsA("Humanoid")
+    if not humanoid then return end
+    
+    -- Prevent flinging by anchoring parts when velocity is too high
+    local function checkVelocity()
+        for _, part in ipairs(character:GetDescendants()) do
+            if part:IsA("BasePart") and part ~= character.PrimaryPart then
+                if part.Velocity.Magnitude > 100 or part.RotVelocity.Magnitude > 100 then
+                    part.Velocity = Vector3.new(0,0,0)
+                    part.RotVelocity = Vector3.new(0,0,0)
+                end
+            end
+        end
+    end
+    
+    -- Run velocity check every frame when enabled
+    RunService.Heartbeat:Connect(function()
+        if AntiFlingEnabled then
+            checkVelocity()
+        end
+    end)
+    
+    -- Also protect against network ownership changes
+    character.ChildAdded:Connect(function(child)
+        if AntiFlingEnabled and child:IsA("BasePart") then
+            child:GetPropertyChangedSignal("Velocity"):Connect(function()
+                if child.Velocity.Magnitude > 100 then
+                    child.Velocity = Vector3.new(0,0,0)
+                end
+            end)
+        end
+    end)
+end
+
+-- God Mode function
+local function enableGodMode()
+    if GodModeEnabled then
+        local character = LocalPlayer.Character
+        if character and character:FindFirstChild("Humanoid") then
+            local humanoid = character.Humanoid
+            humanoid.Name = "1"
+            local newHumanoid = humanoid:Clone()
+            newHumanoid.Parent = character
+            newHumanoid.Name = "Humanoid"
+            task.wait(0.1)
+            character["1"]:Destroy()
+            Workspace.CurrentCamera.CameraSubject = character
+            if character:FindFirstChild("Animate") then
+                character.Animate.Disabled = true
+                task.wait(0.1)
+                character.Animate.Disabled = false
+            end
+            newHumanoid.DisplayDistanceType = "None"
+        end
+    end
+end
+
+-- Gun Teleport function
+local function teleportToGun()
+    -- Find current map
+    local currentMap = nil
+    for _, v in ipairs(Workspace:GetDescendants()) do
+        if v.Name == "Spawns" and v.Parent.Name ~= "Lobby" then
+            currentMap = v.Parent
+            break
+        end
+    end
+    
+    if currentMap then
+        local gunDrop = currentMap:FindFirstChild("GunDrop")
+        if gunDrop and gunDrop:IsA("BasePart") then
+            local character = LocalPlayer.Character
+            if character and character:FindFirstChild("HumanoidRootPart") then
+                character.HumanoidRootPart.CFrame = gunDrop.CFrame
+                Rayfield:Notify({ Title = "Gun Teleport", Content = "Teleported to gun!", Duration = 2 })
+            end
+        else
+            -- Also check workspace directly as fallback
+            local workspaceGun = Workspace:FindFirstChild("GunDrop")
+            if workspaceGun and workspaceGun:IsA("BasePart") then
+                local character = LocalPlayer.Character
+                if character and character:FindFirstChild("HumanoidRootPart") then
+                    character.HumanoidRootPart.CFrame = workspaceGun.CFrame
+                    Rayfield:Notify({ Title = "Gun Teleport", Content = "Teleported to gun!", Duration = 2 })
+                end
+            else
+                Rayfield:Notify({ Title = "Gun Teleport", Content = "No gun dropped!", Duration = 2 })
+            end
+        end
+    else
+        -- Check workspace directly if map not found
+        local workspaceGun = Workspace:FindFirstChild("GunDrop")
+        if workspaceGun and workspaceGun:IsA("BasePart") then
+            local character = LocalPlayer.Character
+            if character and character:FindFirstChild("HumanoidRootPart") then
+                character.HumanoidRootPart.CFrame = workspaceGun.CFrame
+                Rayfield:Notify({ Title = "Gun Teleport", Content = "Teleported to gun!", Duration = 2 })
+            end
+        else
+            Rayfield:Notify({ Title = "Gun Teleport", Content = "No gun dropped!", Duration = 2 })
+        end
+    end
+end
+
+-- Reset on respawn
+LocalPlayer.CharacterAdded:Connect(function()
+    if GodModeEnabled then
+        task.wait(1)
+        enableGodMode()
+    end
+    task.wait(1)
+    setupAntiFling()
+end)
 
 local function isMurderer(plr)
     if not plr then return false end
@@ -65,6 +197,151 @@ local function getRoleColor(plr)
         return Color3.fromRGB(0, 0, 255)
     else
         return Color3.fromRGB(0, 255, 0)
+    end
+end
+
+-- Function to find current map (from Zynic's script)
+local function getCurrentMap()
+    for _, v in ipairs(Workspace:GetDescendants()) do
+        if v.Name == "Spawns" and v.Parent.Name ~= "Lobby" then
+            return v.Parent
+        end
+    end
+    return nil
+end
+
+-- Function to update gun tracer
+local function updateGunTracer()
+    if not DroppedGunTracerEnabled then
+        gunTracer.Visible = false
+        return
+    end
+    
+    local currentMap = getCurrentMap()
+    if not currentMap then 
+        gunTracer.Visible = false
+        return 
+    end
+    
+    local gunDrop = currentMap:FindFirstChild("GunDrop")
+    if gunDrop then
+        local gunPosition = gunDrop.Position
+        local screenPos, onScreen = Camera:WorldToViewportPoint(gunPosition)
+        
+        if onScreen then
+            local screenCenter = Vector2.new(Camera.ViewportSize.X / 2, Camera.ViewportSize.Y)
+            gunTracer.From = screenCenter
+            gunTracer.To = Vector2.new(screenPos.X, screenPos.Y)
+            gunTracer.Visible = true
+        else
+            gunTracer.Visible = false
+        end
+    else
+        gunTracer.Visible = false
+    end
+end
+
+-- Function to highlight dropped gun using GunDrop method
+local function highlightDroppedGun()
+    if not DroppedGunHighlightEnabled then
+        -- Remove all GunDrop highlights
+        for _, obj in ipairs(Workspace:GetDescendants()) do
+            if obj.Name == "GunDrop" then
+                if obj:FindFirstChild("GunDropHighlight") then
+                    obj.GunDropHighlight:Destroy()
+                end
+                if obj:FindFirstChild("GunDropLabel") then
+                    obj.GunDropLabel:Destroy()
+                end
+            end
+        end
+        return
+    end
+    
+    local currentMap = getCurrentMap()
+    if not currentMap then return end
+    
+    local gunDrop = currentMap:FindFirstChild("GunDrop")
+    if gunDrop and not gunDrop:FindFirstChild("GunDropHighlight") then
+        -- Remove old highlights if they exist
+        if gunDrop:FindFirstChild("GunDropHighlight") then
+            gunDrop.GunDropHighlight:Destroy()
+        end
+        if gunDrop:FindFirstChild("GunDropLabel") then
+            gunDrop.GunDropLabel:Destroy()
+        end
+        
+        -- Create highlight
+        local hl = Instance.new("Highlight")
+        hl.Name = "GunDropHighlight"
+        hl.Adornee = gunDrop
+        hl.FillColor = Color3.fromRGB(255, 215, 0)
+        hl.OutlineColor = Color3.fromRGB(255, 255, 255)
+        hl.FillTransparency = 0.3
+        hl.Parent = gunDrop
+        
+        -- Add billboard
+        local bill = Instance.new("BillboardGui")
+        bill.Name = "GunDropLabel"
+        bill.Adornee = gunDrop
+        bill.Size = UDim2.new(0, 100, 0, 30)
+        bill.StudsOffset = Vector3.new(0, 3, 0)
+        bill.AlwaysOnTop = true
+        bill.Parent = gunDrop
+        
+        local txt = Instance.new("TextLabel")
+        txt.Size = UDim2.new(1,0,1,0)
+        txt.BackgroundTransparency = 1
+        txt.Text = "DROPPED GUN"
+        txt.TextColor3 = Color3.fromRGB(255, 215, 0)
+        txt.TextScaled = true
+        txt.Font = Enum.Font.GothamBold
+        txt.Parent = bill
+    end
+end
+
+-- Original Gun ESP functions (for Tool objects)
+local function createToolGunESP(gun)
+    if gun:FindFirstChild("GunDroppedESP") then return end
+    local hl = Instance.new("Highlight")
+    hl.Name = "GunDroppedESP"
+    hl.Adornee = gun
+    hl.FillColor = Color3.fromRGB(255, 215, 0)
+    hl.OutlineColor = Color3.fromRGB(255, 255, 255)
+    hl.FillTransparency = 0.3
+    hl.OutlineTransparency = 0
+    hl.Parent = gun
+
+    local bill = Instance.new("BillboardGui")
+    bill.Name = "GunLabel"
+    bill.Adornee = gun:FindFirstChild("Handle") or gun
+    bill.Size = UDim2.new(0, 100, 0, 30)
+    bill.StudsOffset = Vector3.new(0, 3, 0)
+    bill.AlwaysOnTop = true
+    bill.Parent = gun
+
+    local txt = Instance.new("TextLabel")
+    txt.Size = UDim2.new(1,0,1,0)
+    txt.BackgroundTransparency = 1
+    txt.Text = "GUN"
+    txt.TextColor3 = Color3.fromRGB(255, 215, 0)
+    txt.TextScaled = true
+    txt.Font = Enum.Font.GothamBold
+    txt.Parent = bill
+end
+
+local function refreshToolGunESP()
+    if not GunESPEnabled then
+        for _, obj in ipairs(Workspace:GetChildren()) do
+            if obj:FindFirstChild("GunDroppedESP") then obj.GunDroppedESP:Destroy() end
+            if obj:FindFirstChild("GunLabel") then obj.GunLabel:Destroy() end
+        end
+        return
+    end
+    for _, obj in ipairs(Workspace:GetChildren()) do
+        if obj:IsA("Tool") and obj.Name == "Gun" then
+            createToolGunESP(obj)
+        end
     end
 end
 
@@ -158,50 +435,6 @@ local function updatePlayerHighlights()
                 hl.FillColor = getRoleColor(plr)
                 hl.FillTransparency = FillTransparencyValue
             end
-        end
-    end
-end
-
-local function createDroppedGunESP(gun)
-    if gun:FindFirstChild("GunDroppedESP") then return end
-    local hl = Instance.new("Highlight")
-    hl.Name = "GunDroppedESP"
-    hl.Adornee = gun
-    hl.FillColor = Color3.fromRGB(255, 215, 0)
-    hl.OutlineColor = Color3.fromRGB(255, 255, 255)
-    hl.FillTransparency = 0.3
-    hl.OutlineTransparency = 0
-    hl.Parent = gun
-
-    local bill = Instance.new("BillboardGui")
-    bill.Name = "GunLabel"
-    bill.Adornee = gun:FindFirstChild("Handle") or gun
-    bill.Size = UDim2.new(0, 120, 0, 40)
-    bill.StudsOffset = Vector3.new(0, 3, 0)
-    bill.AlwaysOnTop = true
-    bill.Parent = gun
-
-    local txt = Instance.new("TextLabel")
-    txt.Size = UDim2.new(1,0,1,0)
-    txt.BackgroundTransparency = 1
-    txt.Text = "GUN"
-    txt.TextColor3 = Color3.fromRGB(255, 215, 0)
-    txt.TextScaled = true
-    txt.Font = Enum.Font.GothamBold
-    txt.Parent = bill
-end
-
-local function refreshDroppedGunESP()
-    if not GunESPEnabled then
-        for _, obj in ipairs(Workspace:GetChildren()) do
-            if obj:FindFirstChild("GunDroppedESP") then obj.GunDroppedESP:Destroy() end
-            if obj:FindFirstChild("GunLabel") then obj.GunLabel:Destroy() end
-        end
-        return
-    end
-    for _, obj in ipairs(Workspace:GetChildren()) do
-        if obj:IsA("Tool") and obj.Name == "Gun" then
-            createDroppedGunESP(obj)
         end
     end
 end
@@ -300,17 +533,28 @@ task.spawn(function()
     while task.wait(0.1) do 
         updatePlayerHighlights() 
         if HitboxEnabled then UpdateAllHitboxes() end
+        updateGunTracer()
     end
 end)
 
 task.spawn(function()
-    while task.wait(0.8) do refreshDroppedGunESP() end
+    while task.wait(0.8) do 
+        refreshToolGunESP()
+        highlightDroppedGun()
+    end
 end)
 
 Workspace.ChildAdded:Connect(function(child)
     if GunESPEnabled and child:IsA("Tool") and child.Name == "Gun" then
         task.wait(0.05)
-        createDroppedGunESP(child)
+        createToolGunESP(child)
+    end
+end)
+
+Workspace.DescendantAdded:Connect(function(descendant)
+    if descendant.Name == "GunDrop" and DroppedGunHighlightEnabled then
+        task.wait(0.1)
+        highlightDroppedGun()
     end
 end)
 
@@ -334,6 +578,17 @@ UserInputService.InputBegan:Connect(function(input, gp)
         HitboxSize = math.max(HitboxSize - HitboxStep, MinHitboxSize)
         UpdateAllHitboxes()
         Rayfield:Notify({ Title = "Hitbox Size", Content = tostring(HitboxSize), Duration = 1.5 })
+    elseif input.KeyCode == Enum.KeyCode.G then
+        GodModeEnabled = not GodModeEnabled
+        if GodModeToggle then GodModeToggle:Set(GodModeEnabled) end
+        if GodModeEnabled then
+            enableGodMode()
+            Rayfield:Notify({ Title = "God Mode", Content = "ON", Duration = 2 })
+        else
+            Rayfield:Notify({ Title = "God Mode", Content = "OFF", Duration = 2 })
+        end
+    elseif input.KeyCode == Enum.KeyCode.T then
+        teleportToGun()
     elseif input.UserInputType == Enum.UserInputType.MouseButton2 then
         rightClickHeld = true
     end
@@ -344,6 +599,9 @@ UserInputService.InputEnded:Connect(function(input)
         rightClickHeld = false
     end
 end)
+
+-- Initialize Anti-Fling
+setupAntiFling()
 
 Tab:CreateSection("ESP")
 
@@ -376,11 +634,44 @@ Tab:CreateSlider({
 Tab:CreateSection("Gun ESP")
 
 Tab:CreateToggle({
-    Name = "Gun ESP",
+    Name = "Tool Gun ESP",
     CurrentValue = true,
     Callback = function(Value)
         GunESPEnabled = Value
-        refreshDroppedGunESP()
+        refreshToolGunESP()
+    end,
+})
+
+Tab:CreateToggle({
+    Name = "GunDrop Highlight",
+    CurrentValue = true,
+    Callback = function(Value)
+        DroppedGunHighlightEnabled = Value
+        if Value then
+            highlightDroppedGun()
+        else
+            for _, obj in ipairs(Workspace:GetDescendants()) do
+                if obj.Name == "GunDrop" then
+                    if obj:FindFirstChild("GunDropHighlight") then
+                        obj.GunDropHighlight:Destroy()
+                    end
+                    if obj:FindFirstChild("GunDropLabel") then
+                        obj.GunDropLabel:Destroy()
+                    end
+                end
+            end
+        end
+    end,
+})
+
+Tab:CreateToggle({
+    Name = "GunDrop Tracer",
+    CurrentValue = true,
+    Callback = function(Value)
+        DroppedGunTracerEnabled = Value
+        if not Value then
+            gunTracer.Visible = false
+        end
     end,
 })
 
@@ -404,7 +695,39 @@ AimbotToggle = Tab:CreateToggle({
     end,
 })
 
-Tab:CreateLabel("Press Q baby for toggle and right click for aimlock hold mo po")
+Tab:CreateSection("Utility")
+
+GodModeToggle = Tab:CreateToggle({
+    Name = "God Mode",
+    CurrentValue = false,
+    Callback = function(Value)
+        GodModeEnabled = Value
+        if Value then
+            enableGodMode()
+            Rayfield:Notify({ Title = "God Mode", Content = "ON", Duration = 2 })
+        else
+            Rayfield:Notify({ Title = "God Mode", Content = "OFF", Duration = 2 })
+        end
+    end,
+})
+
+AntiFlingToggle = Tab:CreateToggle({
+    Name = "Anti-Fling",
+    CurrentValue = false,
+    Callback = function(Value)
+        AntiFlingEnabled = Value
+        Rayfield:Notify({ Title = "Anti-Fling", Content = Value and "ON" or "OFF", Duration = 2 })
+    end,
+})
+
+Tab:CreateButton({
+    Name = "Teleport to Gun",
+    Callback = function()
+        teleportToGun()
+    end,
+})
+
+Tab:CreateLabel("Press Q for aimbot and G Po for god mode Baby")
 
 Tab:CreateSection("Hitbox Expander")
 
@@ -455,7 +778,7 @@ Rayfield:LoadConfiguration()
 
 Rayfield:Notify({
     Title = "I Love Annie - MM2",
-    Content = "Loaded!\nP = hide/show\nU = hitbox visuals, +/- = size",
+    Content = "Loaded!\nP = hide/show\nG = god mode\nT = teleport to gun\nAnti-Fling included",
     Duration = 4,
 })
 
