@@ -14,6 +14,8 @@ local CombatTab    = Window:CreateTab("Combat", 4483362458)
 local UtilityTab   = Window:CreateTab("Utilities", 4483362458)
 local RageTab      = Window:CreateTab("Rage", 4483362458)
 local PlayersTab   = Window:CreateTab("Players", 4483362458)
+local DesyncTab    = Window:CreateTab("Desync", 4483362458)
+local AutoAvoidTab = Window:CreateTab("Auto Avoid", 4483362458)
 
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
@@ -25,6 +27,90 @@ local mouse = LocalPlayer:GetMouse()
 if not getgenv().FPDH then
     getgenv().FPDH = workspace.FallenPartsDestroyHeight
 end
+
+-- Desync Configuration
+getgenv().Desync = {
+    Enabled = false,
+    Method = "Sky",
+    OscillateDistance = 50,
+    OscillateSpeed = 5,
+    SpinSpeed = 20,
+    RandomDistance = 100,
+    ReturnToPosition = true,
+    AutoDesyncOnDamage = false,
+    HealthThreshold = 99,
+    LastHealth = 100,
+    Cooldown = 1,
+    LastTriggered = 0,
+    AutoAvoidMurderer = false,
+    AvoidDistance = 20,
+    AutoAvoidActive = false
+}
+
+local DesyncData = {
+    OriginalCFrame = CFrame.new(),
+    StartTime = tick(),
+}
+
+local DesyncMethods = {
+    Void = function(RootPart)
+        RootPart.CFrame = CFrame.new(math.sqrt(-1), math.sqrt(-1), math.sqrt(-1))
+        RunService.RenderStepped:Wait()
+        if getgenv().Desync.ReturnToPosition then
+            RootPart.CFrame = DesyncData.OriginalCFrame
+        end
+    end,
+    
+    Sky = function(RootPart)
+        RootPart.CFrame = DesyncData.OriginalCFrame * CFrame.new(0, 100000, 0)
+        RunService.RenderStepped:Wait()
+        if getgenv().Desync.ReturnToPosition then
+            RootPart.CFrame = DesyncData.OriginalCFrame
+        end
+    end,
+    
+    Underground = function(RootPart)
+        RootPart.CFrame = DesyncData.OriginalCFrame * CFrame.new(0, -10000, 0)
+        RunService.RenderStepped:Wait()
+        if getgenv().Desync.ReturnToPosition then
+            RootPart.CFrame = DesyncData.OriginalCFrame
+        end
+    end,
+    
+    Random = function(RootPart)
+        local RandX = math.random(-getgenv().Desync.RandomDistance, getgenv().Desync.RandomDistance)
+        local RandY = math.random(-getgenv().Desync.RandomDistance, getgenv().Desync.RandomDistance)
+        local RandZ = math.random(-getgenv().Desync.RandomDistance, getgenv().Desync.RandomDistance)
+        
+        RootPart.CFrame = DesyncData.OriginalCFrame * CFrame.new(RandX, RandY, RandZ)
+        RunService.RenderStepped:Wait()
+        if getgenv().Desync.ReturnToPosition then
+            RootPart.CFrame = DesyncData.OriginalCFrame
+        end
+    end,
+    
+    Oscillate = function(RootPart)
+        local ElapsedTime = tick() - DesyncData.StartTime
+        local Distance = math.sin(ElapsedTime * getgenv().Desync.OscillateSpeed) * getgenv().Desync.OscillateDistance
+        
+        RootPart.CFrame = DesyncData.OriginalCFrame * CFrame.new(0, Distance, 0)
+        RunService.RenderStepped:Wait()
+        if getgenv().Desync.ReturnToPosition then
+            RootPart.CFrame = DesyncData.OriginalCFrame
+        end
+    end,
+    
+    Spin = function(RootPart)
+        local ElapsedTime = tick() - DesyncData.StartTime
+        local Angle = ElapsedTime * getgenv().Desync.SpinSpeed
+        
+        RootPart.CFrame = DesyncData.OriginalCFrame * CFrame.Angles(0, Angle, 0)
+        RunService.RenderStepped:Wait()
+        if getgenv().Desync.ReturnToPosition then
+            RootPart.CFrame = DesyncData.OriginalCFrame
+        end
+    end,
+}
 
 local function FlingNotify(title, text, duration)
     Rayfield:Notify({
@@ -78,6 +164,11 @@ local OriginalCameraSubject = nil
 local AimbotToggleObj
 local GodModeToggleObj
 local VisualizeHitboxToggleObj
+local DesyncToggleObj
+local AutoAvoidToggleObj
+
+-- Variable to store the Desync toggle set function
+local SetDesyncToggle = nil
 
 local function isAlive(plr)
     if not plr or not plr.Character then return false end
@@ -103,6 +194,126 @@ end
 
 local function hasGun()
     return LocalPlayer.Backpack:FindFirstChild("Gun") or (LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Gun"))
+end
+
+-- Desync Functions
+local function getNearestMurdererDistance()
+    local character = LocalPlayer.Character
+    if not character then return nil end
+    local hrp = character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return nil end
+    
+    local nearestDistance = math.huge
+    
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer and isAlive(plr) and isMurderer(plr) then
+            local targetChar = plr.Character
+            local targetHrp = targetChar and targetChar:FindFirstChild("HumanoidRootPart")
+            if targetHrp then
+                local distance = (hrp.Position - targetHrp.Position).Magnitude
+                if distance < nearestDistance then
+                    nearestDistance = distance
+                end
+            end
+        end
+    end
+    
+    return nearestDistance == math.huge and nil or nearestDistance
+end
+
+local function LocalTriggerDesyncOnce()
+    local LocalCharacter = LocalPlayer.Character
+    local LocalRootPart = LocalCharacter and LocalCharacter:FindFirstChild("HumanoidRootPart")
+    if not LocalRootPart then return end
+
+    DesyncData.OriginalCFrame = LocalRootPart.CFrame
+    DesyncData.StartTime = tick() 
+
+    local SelectedMethodName = getgenv().Desync.Method
+    local MethodToCall = DesyncMethods[SelectedMethodName]
+
+    if MethodToCall then
+        MethodToCall(LocalRootPart)
+    end
+    
+    getgenv().Desync.LastTriggered = tick()
+end
+
+if getgenv().Desync then
+    getgenv().Desync.TriggerOnce = LocalTriggerDesyncOnce
+end
+
+local function checkHealthForDesync()
+    local character = LocalPlayer.Character
+    if not character then return end
+    
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if not humanoid then return end
+    
+    local currentHealth = humanoid.Health
+    local maxHealth = humanoid.MaxHealth
+    local healthPercent = (currentHealth / maxHealth) * 100
+    local desync = getgenv().Desync
+    
+    if desync.AutoDesyncOnDamage and healthPercent < desync.HealthThreshold and 
+       desync.LastHealth > healthPercent and 
+       (tick() - desync.LastTriggered) > desync.Cooldown then
+        
+        LocalTriggerDesyncOnce()
+        Rayfield:Notify({Title = "Auto Desync", Content = "Triggered by damage!", Duration = 3})
+    end
+    
+    desync.LastHealth = healthPercent
+end
+
+-- FIXED Auto Avoid Murderer function with proper GUI toggle updates
+local function checkAutoAvoidMurderer()
+    local desync = getgenv().Desync
+    if not desync.AutoAvoidMurderer then 
+        -- Clean up if auto-avoid was turned off while active
+        if desync.AutoAvoidActive then
+            desync.AutoAvoidActive = false
+            if desync.Enabled then
+                desync.Enabled = false
+                -- Update GUI toggle if available
+                if SetDesyncToggle then
+                    SetDesyncToggle(false)
+                end
+                Rayfield:Notify({Title = "Auto Avoid", Content = "Disabled. Desync turned OFF.", Duration = 2})
+            end
+        end
+        return 
+    end
+    
+    local nearestMurdererDist = getNearestMurdererDistance()
+    local character = LocalPlayer.Character
+    if not character then return end
+    
+    -- If murderer is near
+    if nearestMurdererDist and nearestMurdererDist <= desync.AvoidDistance then
+        -- If desync isn't enabled, enable it via auto-avoid
+        if not desync.Enabled then
+            desync.AutoAvoidActive = true
+            desync.Enabled = true
+            desync.Method = "Sky" -- Force Sky method
+            -- Update GUI toggle
+            if SetDesyncToggle then
+                SetDesyncToggle(true)
+            end
+            Rayfield:Notify({Title = "Auto Avoid", Content = "Murderer near! Sky Desync ON", Duration = 2})
+        end
+    else
+        -- No murderer near, turn off if auto-avoid was the one that turned it on
+        if desync.Enabled and desync.AutoAvoidActive then
+            desync.Enabled = false
+            desync.AutoAvoidActive = false
+            -- Update GUI toggle
+            if SetDesyncToggle then
+                SetDesyncToggle(false)
+            end
+            Rayfield:Notify({Title = "Auto Avoid", Content = "Murderer left. Desync turned OFF.", Duration = 2})
+        end
+    end
 end
 
 local SkidFling = function(TargetPlayer)
@@ -801,6 +1012,27 @@ Players.PlayerRemoving:Connect(function(plr)
     end
 end)
 
+-- Desync Heartbeat Loop
+coroutine.wrap(function()
+    RunService.Heartbeat:Connect(function()
+        checkHealthForDesync()
+        checkAutoAvoidMurderer()
+        
+        if getgenv().Desync.Enabled then
+            local LocalCharacter = LocalPlayer.Character
+            local LocalRootPart = LocalCharacter and LocalCharacter:FindFirstChild("HumanoidRootPart")
+            if not LocalRootPart then return end
+
+            DesyncData.OriginalCFrame = LocalRootPart.CFrame
+            
+            local SelectedMethod = getgenv().Desync.Method
+            if DesyncMethods[SelectedMethod] then
+                DesyncMethods[SelectedMethod](LocalRootPart)
+            end
+        end
+    end)
+end)()
+
 task.spawn(function()
     while task.wait(0.25) do
         updatePlayerHighlights()
@@ -861,6 +1093,18 @@ UserInputService.InputBegan:Connect(function(input, gp)
     elseif input.KeyCode == Enum.KeyCode.Q then
         AimbotEnabled = not AimbotEnabled
         AimbotToggleObj:Set(AimbotEnabled)
+    elseif input.KeyCode == Enum.KeyCode.Z then
+        local newDesync = not getgenv().Desync.Enabled
+        getgenv().Desync.Enabled = newDesync
+        -- If manually toggling, clear auto-avoid active state
+        if not newDesync then
+            getgenv().Desync.AutoAvoidActive = false
+        end
+        -- Update GUI toggle through the stored function
+        if SetDesyncToggle then
+            SetDesyncToggle(newDesync)
+        end
+        Rayfield:Notify({Title = "Desync", Content = newDesync and "ON" or "OFF", Duration = 2})
     end
 end)
 
@@ -877,6 +1121,23 @@ UserInputService.InputEnded:Connect(function(input)
 end)
 
 setupAntiFling()
+
+-- Desync Metamethod Hook
+local OriginalCFrameHook = nil
+OriginalCFrameHook = hookmetamethod(game, "__index", newcclosure(function(Self, Key)
+    if getgenv().Desync.Enabled then
+        if not checkcaller() then
+            if Key == "CFrame" and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") and LocalPlayer.Character:FindFirstChild("Humanoid") and LocalPlayer.Character.Humanoid.Health > 0 then
+                if Self == LocalPlayer.Character.HumanoidRootPart then
+                    return DesyncData.OriginalCFrame or CFrame.new()
+                elseif Self == LocalPlayer.Character.Head then
+                    return DesyncData.OriginalCFrame or CFrame.new()
+                end
+            end
+        end
+    end
+    return OriginalCFrameHook(Self, Key)
+end))
 
 VisualsTab:CreateSection("Player ESP")
 VisualsTab:CreateToggle({Name = "ESP Highlight", CurrentValue = false, Callback = function(v)
@@ -975,7 +1236,7 @@ UtilityTab:CreateSlider({Name = "Hitbox Size", Range = {5,50}, Increment = 5, Cu
     HitboxSize = v
     if HitboxEnabled then UpdateAllHitboxes() end
 end})
-UtilityTab:CreateLabel("HOTKEYS:\nP = Toggle GUI\nQ = Aimbot toggle\nG = God Mode\nU = Toggle hitbox visuals")
+UtilityTab:CreateLabel("HOTKEYS:\nP = Toggle GUI\nQ = Aimbot toggle\nG = God Mode\nU = Toggle hitbox visuals\nZ = Desync toggle")
 
 RageTab:CreateSection("Rage - Kill Features")
 RageTab:CreateToggle({Name = "Kill Aura", CurrentValue = false, Callback = function(Value)
@@ -1036,10 +1297,188 @@ PlayersTab:CreateToggle({
 })
 PlayersTab:CreateLabel("HOW TO USE:\n1. Select player (refresh if needed)\n2. Use any action")
 
+-- DESYNC TAB
+DesyncTab:CreateSection("Main Desync")
+
+-- Store the toggle object and create a function to update it
+local DesyncToggle = DesyncTab:CreateToggle({
+    Name = "Enable Desync (Z to toggle)",
+    CurrentValue = false,
+    Callback = function(v)
+        getgenv().Desync.Enabled = v
+        -- If manually turning off, clear auto-avoid active state
+        if not v then
+            getgenv().Desync.AutoAvoidActive = false
+        end
+    end,
+})
+
+-- Create function to update the toggle from auto-avoid
+SetDesyncToggle = function(value)
+    if DesyncToggle and DesyncToggle.Set then
+        DesyncToggle:Set(value)
+    end
+end
+
+DesyncTab:CreateKeybind({
+    Name = "Desync Keybind",
+    CurrentKeybind = "Z",
+    HoldToUse = false,
+    Callback = function()
+        local newValue = not getgenv().Desync.Enabled
+        getgenv().Desync.Enabled = newValue
+        -- If manually turning off, clear auto-avoid active state
+        if not newValue then
+            getgenv().Desync.AutoAvoidActive = false
+        end
+        -- Update the toggle
+        if DesyncToggle and DesyncToggle.Set then
+            DesyncToggle:Set(newValue)
+        end
+        Rayfield:Notify({Title = "Desync", Content = newValue and "ON" or "OFF", Duration = 2})
+    end,
+})
+
+DesyncTab:CreateDropdown({
+    Name = "Desync Method",
+    Options = {"Void", "Sky", "Underground", "Random", "Oscillate", "Spin"},
+    CurrentOption = "Sky",
+    Callback = function(v)
+        getgenv().Desync.Method = v
+    end,
+})
+
+DesyncTab:CreateToggle({
+    Name = "Return to Position",
+    CurrentValue = true,
+    Callback = function(v)
+        getgenv().Desync.ReturnToPosition = v
+    end,
+})
+
+DesyncTab:CreateSection("Auto Desync on Damage")
+
+DesyncTab:CreateToggle({
+    Name = "Auto Desync on Damage",
+    CurrentValue = false,
+    Callback = function(v)
+        getgenv().Desync.AutoDesyncOnDamage = v
+    end,
+})
+
+DesyncTab:CreateSlider({
+    Name = "Health % to Trigger",
+    Range = {1, 100},
+    Increment = 1,
+    CurrentValue = 90,
+    Callback = function(v)
+        getgenv().Desync.HealthThreshold = v
+    end,
+})
+
+DesyncTab:CreateSlider({
+    Name = "Cooldown (seconds)",
+    Range = {0.1, 5},
+    Increment = 0.1,
+    CurrentValue = 1,
+    Callback = function(v)
+        getgenv().Desync.Cooldown = v
+    end,
+})
+
+DesyncTab:CreateSection("Method Settings")
+
+DesyncTab:CreateSlider({
+    Name = "Random Distance",
+    Range = {10, 500},
+    Increment = 10,
+    CurrentValue = 100,
+    Callback = function(v)
+        getgenv().Desync.RandomDistance = v
+    end,
+})
+
+DesyncTab:CreateSlider({
+    Name = "Oscillate Distance",
+    Range = {10, 200},
+    Increment = 5,
+    CurrentValue = 50,
+    Callback = function(v)
+        getgenv().Desync.OscillateDistance = v
+    end,
+})
+
+DesyncTab:CreateSlider({
+    Name = "Oscillate Speed",
+    Range = {1, 20},
+    Increment = 0.5,
+    CurrentValue = 5,
+    Callback = function(v)
+        getgenv().Desync.OscillateSpeed = v
+    end,
+})
+
+DesyncTab:CreateSlider({
+    Name = "Spin Speed",
+    Range = {5, 100},
+    Increment = 5,
+    CurrentValue = 20,
+    Callback = function(v)
+        getgenv().Desync.SpinSpeed = v
+    end,
+})
+
+-- AUTO AVOID TAB
+AutoAvoidTab:CreateSection("Auto Avoid Murderer (Sky Desync)")
+
+AutoAvoidToggleObj = AutoAvoidTab:CreateToggle({
+    Name = "Auto Avoid Murderer",
+    CurrentValue = false,
+    Callback = function(v)
+        getgenv().Desync.AutoAvoidMurderer = v
+        Rayfield:Notify({Title = "Auto Avoid", Content = v and "ENABLED" or "DISABLED", Duration = 2})
+    end,
+})
+
+AutoAvoidTab:CreateSlider({
+    Name = "Avoid Distance (studs)",
+    Range = {5, 50},
+    Increment = 1,
+    CurrentValue = 20,
+    Callback = function(v)
+        getgenv().Desync.AvoidDistance = v
+    end,
+})
+
+AutoAvoidTab:CreateLabel("When enabled: Automatically activates Sky desync when a murderer gets near you, then turns off when they leave.")
+
+AutoAvoidTab:CreateSection("Status")
+local StatusLabel = AutoAvoidTab:CreateLabel("Status: Waiting...")
+
+-- Update status label
+task.spawn(function()
+    while task.wait(0.5) do
+        if getgenv().Desync.AutoAvoidMurderer then
+            local dist = getNearestMurdererDistance()
+            if dist then
+                if dist <= getgenv().Desync.AvoidDistance then
+                    StatusLabel:Set("Status: MURDERER NEAR! (" .. math.floor(dist) .. " studs) - Desync ACTIVE")
+                else
+                    StatusLabel:Set("Status: Murderer at " .. math.floor(dist) .. " studs - Safe")
+                end
+            else
+                StatusLabel:Set("Status: No murderer nearby - Safe")
+            end
+        else
+            StatusLabel:Set("Status: Auto Avoid Disabled")
+        end
+    end
+end)
+
 Rayfield:LoadConfiguration()
 
 Rayfield:Notify({
     Title = "I Love Annie - MM2",
-    Content = "Loaded successfully",
+    Content = "Loaded successfully with Desync!",
     Duration = 8,
 })
