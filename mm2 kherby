@@ -218,20 +218,25 @@ local function startTriggerbot()
         local char = targetPart:FindFirstAncestorWhichIsA("Model")
         
         if char then
-            -- Check if the part we're hovering is a character part (not just an expanded hitbox)
-            -- Also verify the part is actually attached to a real character body part
             local isValidTarget = false
-            for _, bodyPart in ipairs({"Head", "Torso", "UpperTorso", "LowerTorso", "LeftArm", "RightArm", "LeftLeg", "RightLeg", "HumanoidRootPart"}) do
-                if char:FindFirstChild(bodyPart) == targetPart then
+            
+            local bodyParts = {
+                "Head", "Torso", "UpperTorso", "LowerTorso", 
+                "Left Arm", "Right Arm", "Left Leg", "Right Leg",
+                "LeftHand", "RightHand", "LeftFoot", "RightFoot"
+            }
+            
+            for _, partName in ipairs(bodyParts) do
+                local bodyPart = char:FindFirstChild(partName)
+                if bodyPart and (bodyPart == targetPart or targetPart:IsDescendantOf(bodyPart)) then
                     isValidTarget = true
                     break
                 end
             end
             
-            -- Also check if it's a mesh part that belongs to the character (clothing, accessories)
             if not isValidTarget then
-                if targetPart:IsA("MeshPart") or targetPart:IsA("Part") then
-                    if targetPart.Parent == char then
+                if (targetPart:IsA("MeshPart") or targetPart:IsA("Part")) and targetPart.Parent == char then
+                    if targetPart.Name ~= "HumanoidRootPart" then
                         isValidTarget = true
                     end
                 end
