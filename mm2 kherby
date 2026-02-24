@@ -224,11 +224,10 @@ end
 local function SetupPlayerESP(plr)
     if plr == LocalPlayer then return end
 
-    -- Tool change listeners (Backpack + Character) - this fixes role update issues
     local function OnToolChange()
         task.wait(0.08)
         if ESPEnabled and plr.Character and isAlive(plr) then
-            CreateESP(plr.Character, plr)  -- full recreate = instant correct color
+            CreateESP(plr.Character, plr)
         else
             UpdateAllESPColors()
         end
@@ -250,9 +249,8 @@ local function SetupPlayerESP(plr)
         end)
     end
 
-    -- Character respawn / join handling
     plr.CharacterAdded:Connect(function(char)
-        task.wait(0.85) -- enough time for MM2 to give tools + character to fully load
+        task.wait(0.85)
         if ESPEnabled and char.Parent then
             CreateESP(char, plr)
         end
@@ -262,7 +260,6 @@ local function SetupPlayerESP(plr)
         CleanupESP(char)
     end)
 
-    -- Initial creation for already loaded players
     if plr.Character then
         task.spawn(function()
             task.wait(1.2)
@@ -271,18 +268,18 @@ local function SetupPlayerESP(plr)
     end
 end
 
--- Setup for all current players
 for _, plr in ipairs(Players:GetPlayers()) do
     SetupPlayerESP(plr)
 end
 Players.PlayerAdded:Connect(SetupPlayerESP)
 
--- ==================== REST OF ORIGINAL SCRIPT (unchanged except ESP references) ====================
+-- ==================== OTHER VARIABLES ====================
 local GunESPEnabled = true
 local DroppedGunHighlightEnabled = true
 local GunTracerEnabled = true
 local TriggerbotEnabled = false
 local GodModeEnabled = false
+local GodModeHotkeyUnlocked = false   -- NEW: only true after GUI toggle is turned ON
 local AntiFlingEnabled = false
 local HitboxEnabled = false
 local VisualizeHitbox = false
@@ -415,8 +412,7 @@ local function checkAutoAvoidMurderer()
     end
 end
 
-local SkidFling = function(TargetPlayer)
-    -- (original SkidFling code unchanged - too long to repeat, keep your original)
+local SkidFling = function(TargetPlayer) -- (your original SkidFling code - unchanged)
     local Character = LocalPlayer.Character
     local Humanoid = Character and Character:FindFirstChildOfClass("Humanoid")
     local RootPart = Humanoid and Humanoid.RootPart
@@ -1125,12 +1121,12 @@ end)()
 
 task.spawn(function()
     while task.wait(0.25) do
-        UpdateAllESPColors()        -- fixed role color updates
+        UpdateAllESPColors()
         if HitboxEnabled then UpdateAllHitboxes() end
         refreshToolGunESP()
         highlightDroppedGun()
         updateGunTracer()
-        ForceRefreshESP()           -- guaranteed ESP on everyone every 0.25s
+        ForceRefreshESP()
     end
 end)
 
@@ -1177,9 +1173,15 @@ UserInputService.InputBegan:Connect(function(input, gp)
         UpdateAllHitboxes()
         Rayfield:Notify({Title = "Hitbox Size", Content = tostring(HitboxSize), Duration = 1.5})
     elseif input.KeyCode == Enum.KeyCode.G then
+        -- NEW LOGIC: G only works after GUI toggle has been turned ON
+        if not GodModeHotkeyUnlocked then
+            Rayfield:Notify({Title = "God Mode", Content = "Enable God Mode toggle in the GUI first!", Duration = 3})
+            return
+        end
         GodModeEnabled = not GodModeEnabled
         GodModeToggleObj:Set(GodModeEnabled)
         if GodModeEnabled then enableGodMode() end
+        Rayfield:Notify({Title = "God Mode", Content = GodModeEnabled and "ON" or "OFF", Duration = 1.5})
     elseif input.KeyCode == Enum.KeyCode.Q then
         AimbotEnabled = not AimbotEnabled
         AimbotToggleObj:Set(AimbotEnabled)
@@ -1227,7 +1229,7 @@ OriginalCFrameHook = hookmetamethod(game, "__index", newcclosure(function(Self, 
 end))
 
 -- ==================== UI CREATION ====================
--- VISUALS
+-- VISUALS (unchanged)
 VisualsTab:CreateSection("Player ESP")
 VisualsTab:CreateToggle({Name = "ESP Highlight", CurrentValue = false, Callback = function(v)
     ESPEnabled = v
@@ -1316,14 +1318,17 @@ CombatTab:CreateSlider({Name = "Hitbox Size", Range = {5,50}, Increment = 5, Cur
     if HitboxEnabled then UpdateAllHitboxes() end
 end})
 
--- MOVEMENT (unchanged)
+-- MOVEMENT - GOD MODE NOW REQUIRES GUI TOGGLE FIRST FOR G KEYBIND
 MovementTab:CreateSection("Survival Exploits")
 GodModeToggleObj = MovementTab:CreateToggle({
     Name = "God Mode",
     CurrentValue = false,
     Callback = function(v)
         GodModeEnabled = v
-        if v then enableGodMode() end
+        if v then
+            GodModeHotkeyUnlocked = true   -- UNLOCKS the G keybind forever once GUI is toggled ON
+            enableGodMode()
+        end
         Rayfield:Notify({Title="God Mode",Content=v and "ON" or "OFF",Duration=2})
     end
 })
@@ -1331,6 +1336,8 @@ MovementTab:CreateToggle({Name = "Anti-Fling", CurrentValue = false, Callback = 
     AntiFlingEnabled = v
     Rayfield:Notify({Title="Anti-Fling",Content=v and "ON" or "OFF",Duration=2})
 end})
+
+-- (Rest of Movement tab unchanged - Desync, Teleports, etc.)
 MovementTab:CreateSection("Desync")
 local DesyncToggle = MovementTab:CreateToggle({
     Name = "Enable Desync (Z to toggle)",
@@ -1416,7 +1423,7 @@ MovementTab:CreateButton({Name = "Respawn", Callback = respawn})
 MovementTab:CreateButton({Name = "Teleport to Gun (Snap Back)", Callback = TeleportToGunSnapBack})
 MovementTab:CreateToggle({Name = "Auto Teleport to Gun", CurrentValue = false, Callback = function(v) AutoGunTPEnabled = v end})
 
--- PLAYERS
+-- PLAYERS (unchanged)
 PlayersTab:CreateSection("Player Selector")
 local PlayerDropdown = PlayersTab:CreateDropdown({
     Name = "Select Player",
@@ -1460,11 +1467,11 @@ PlayersTab:CreateToggle({
 })
 PlayersTab:CreateLabel("HOW TO USE:\n1. Select player (refresh if needed)\n2. Use any action")
 
-MovementTab:CreateLabel("HOTKEYS:\nP = Toggle GUI\nQ = Aimbot\nG = God Mode\nZ = Desync\nU = Hitbox Visuals")
+MovementTab:CreateLabel("HOTKEYS:\nP = Toggle GUI\nQ = Aimbot\nG = God Mode (only after enabling GUI toggle)\nZ = Desync\nU = Hitbox Visuals")
 
 Rayfield:LoadConfiguration()
 Rayfield:Notify({
     Title = "I Love Annie - MM2",
-    Content = "✅ ESP FULLY FIXED\nRoles now update instantly\nEvery join/respawn gets ESP instantly",
+    Content = "✅ ESP FIXED\n✅ God Mode G keybind now REQUIRES GUI toggle first!\nTurn ON God Mode in GUI → then G works",
     Duration = 10,
 })
