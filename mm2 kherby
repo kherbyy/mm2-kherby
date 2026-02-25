@@ -1,4 +1,5 @@
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
+
 local Window = Rayfield:CreateWindow({
     Name = "I Love Annie - MM2",
     LoadingTitle = "I Love Annie",
@@ -19,6 +20,128 @@ local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 local LocalPlayer = Players.LocalPlayer
 local mouse = LocalPlayer:GetMouse()
+
+-- WeaponService for Murderer Auto-Aim
+local WeaponService = nil
+local autoAimEnabled = false
+local aimOnlyWhenHolding = false
+local showAimNotifications = true
+local predictionEnabled = true
+local predictionAmount = 0.15
+local originalGetTarget = nil
+local aimbotActive = false
+
+-- Function to get WeaponService
+local function getWeaponService()
+    local success, result = pcall(function()
+        return require(game:GetService("ReplicatedStorage"):WaitForChild("ClientServices"):WaitForChild("WeaponService"))
+    end)
+    if success then
+        return result
+    end
+    return nil
+end
+
+-- Murderer detection functions
+local function isMurderer(plr)
+    if not plr then return false end
+    return (plr.Backpack:FindFirstChild("Knife") or (plr.Character and plr.Character:FindFirstChild("Knife")))
+end
+
+local function isAlive(plr)
+    if not plr or not plr.Character then return false end
+    local hum = plr.Character:FindFirstChild("Humanoid")
+    return hum and hum.Health > 0
+end
+
+-- Find murderer position for auto-aim
+local function getMurdererPosition()
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer and isAlive(plr) and isMurderer(plr) then
+            local character = plr.Character
+            local targetPart = character:FindFirstChild("Head") or 
+                              character:FindFirstChild("HumanoidRootPart")
+            if targetPart then
+                return targetPart.Position
+            end
+        end
+    end
+    return nil
+end
+
+-- Setup aimbot override
+local function setupAimbot()
+    WeaponService = getWeaponService()
+    if WeaponService and WeaponService.GetMouseTargetCFrame then
+        originalGetTarget = WeaponService.GetMouseTargetCFrame
+        
+        WeaponService.GetMouseTargetCFrame = function(self)
+            if autoAimEnabled then
+                if aimOnlyWhenHolding then
+                    if not (UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) or 
+                           UserInputService:IsKeyDown(Enum.KeyCode.RightShift)) then
+                        return originalGetTarget(self)
+                    end
+                end
+                
+                local murdererPos = getMurdererPosition()
+                if murdererPos then
+                    if predictionEnabled then
+                        for _, plr in ipairs(Players:GetPlayers()) do
+                            if plr ~= LocalPlayer and isAlive(plr) and isMurderer(plr) then
+                                local hrp = plr.Character:FindFirstChild("HumanoidRootPart")
+                                if hrp and hrp.Velocity.Magnitude > 5 then
+                                    murdererPos = murdererPos + (hrp.Velocity * predictionAmount)
+                                end
+                                break
+                            end
+                        end
+                    end
+                    
+                    if showAimNotifications and not aimbotActive then
+                        Rayfield:Notify({
+                            Title = "🎯 Murderer Locked",
+                            Content = "Auto-aim active!",
+                            Duration = 1
+                        })
+                        aimbotActive = true
+                    end
+                    
+                    return CFrame.new(murdererPos)
+                else
+                    if aimbotActive and showAimNotifications then
+                        Rayfield:Notify({
+                            Title = "❌ No Murderer",
+                            Content = "Target lost",
+                            Duration = 1
+                        })
+                        aimbotActive = false
+                    end
+                end
+            end
+            return originalGetTarget(self)
+        end
+        
+        if showAimNotifications then
+            Rayfield:Notify({
+                Title = "✅ Auto-Aim Ready",
+                Content = "WeaponService hooked successfully!",
+                Duration = 3
+            })
+        end
+    end
+end
+
+-- Try to setup aimbot immediately
+setupAimbot()
+
+-- Keep trying if WeaponService loads later
+game:GetService("ReplicatedStorage").ChildAdded:Connect(function(child)
+    if child.Name == "ClientServices" then
+        task.wait(1)
+        setupAimbot()
+    end
+end)
 
 if not getgenv().FPDH then
     getgenv().FPDH = workspace.FallenPartsDestroyHeight
@@ -107,17 +230,6 @@ local ESPEnabled = false
 local NameESPEnabled = true
 local FillTransparencyValue = 0.4
 
-local function isAlive(plr)
-    if not plr or not plr.Character then return false end
-    local hum = plr.Character:FindFirstChild("Humanoid")
-    return hum and hum.Health > 0
-end
-
-local function isMurderer(plr)
-    if not plr then return false end
-    return (plr.Backpack:FindFirstChild("Knife") or (plr.Character and plr.Character:FindFirstChild("Knife")))
-end
-
 local function isSheriff(plr)
     if not plr then return false end
     local gunNames = {"Gun", "Revolver"}
@@ -164,20 +276,21 @@ local function CreateESP(char, plr)
         local bill = Instance.new("BillboardGui")
         bill.Name = "MM2NameTag"
         bill.Adornee = adornee
-        bill.Size = UDim2.new(4, 0, 1, 0)
-        bill.StudsOffset = Vector3.new(0, 3.5, 0)
+        bill.Size = UDim2.new(9, 0, 2.5, 0)
+        bill.StudsOffset = Vector3.new(0, 6, 0)
         bill.AlwaysOnTop = true
         bill.LightInfluence = 0
         bill.Parent = char
         local txt = Instance.new("TextLabel")
         txt.Size = UDim2.new(1,0,1,0)
-        txt.BackgroundTransparency = 1
+        txt.BackgroundTransparency = 0.35
+        txt.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
         txt.Text = plr.Name
         txt.TextColor3 = getRoleColor(plr)
         txt.TextScaled = true
         txt.Font = Enum.Font.GothamBold
         txt.TextStrokeTransparency = 0
-        txt.TextStrokeColor3 = Color3.new(0,0,0)
+        txt.TextStrokeColor3 = Color3.fromRGB(0,0,0)
         txt.Parent = bill
     end
 end
@@ -199,11 +312,6 @@ local function UpdateAllESPColors()
             if hl then
                 hl.FillColor = getRoleColor(plr)
                 hl.FillTransparency = FillTransparencyValue
-            end
-            local nameTag = plr.Character:FindFirstChild("MM2NameTag")
-            if nameTag then
-                local txt = nameTag:FindFirstChildWhichIsA("TextLabel")
-                if txt then txt.TextColor3 = getRoleColor(plr) end
             end
         end
     end
@@ -1199,6 +1307,7 @@ OriginalCFrameHook = hookmetamethod(game, "__index", newcclosure(function(Self, 
     return OriginalCFrameHook(Self, Key)
 end))
 
+-- Visuals Tab
 VisualsTab:CreateSection("Player ESP")
 VisualsTab:CreateToggle({Name = "ESP Highlight", CurrentValue = false, Callback = function(v)
     ESPEnabled = v
@@ -1231,9 +1340,10 @@ VisualsTab:CreateToggle({Name = "Gun Tracer", CurrentValue = true, Callback = fu
     if not v and CurrentGunTracer then CurrentGunTracer:Destroy() CurrentGunTracer = nil end
 end})
 
-AimbotTab:CreateSection("Aimbot Settings")
+-- Aimbot Tab (Now includes both Camera Aimbot and Murderer Auto-Aim)
+AimbotTab:CreateSection("Camera Aimbot Settings")
 AimbotToggleObj = AimbotTab:CreateToggle({
-    Name = "Aimbot (Press Q to toggle)",
+    Name = "Camera Aimbot (Press Q to toggle)",
     CurrentValue = false,
     Callback = function(v) AimbotEnabled = v end
 })
@@ -1245,6 +1355,105 @@ AimbotTab:CreateSlider({Name = "Smoothness (only when prediction ON)", Range = {
 AimbotTab:CreateSlider({Name = "FOV", Range = {80,400}, Increment = 5, CurrentValue = 220, Callback = function(v) AimbotFOV = v end})
 AimbotTab:CreateToggle({Name = "Only Target Murderer", CurrentValue = false, Callback = function(v) AimbotOnlyMurderer = v end})
 
+AimbotTab:CreateSection("Murderer Auto-Aim (100% Hit Rate)")
+
+local MurdererAutoAimToggle = AimbotTab:CreateToggle({
+    Name = "Enable Murderer Auto-Aim",
+    CurrentValue = false,
+    Callback = function(value)
+        autoAimEnabled = value
+        if not value then
+            aimbotActive = false
+        end
+        Rayfield:Notify({
+            Title = "Murderer Auto-Aim",
+            Content = value and "✅ ON - Every bullet hits murderer!" or "❌ OFF",
+            Duration = 2
+        })
+    end
+})
+
+AimbotTab:CreateToggle({
+    Name = "Only When Holding Shift",
+    CurrentValue = false,
+    Callback = function(value)
+        aimOnlyWhenHolding = value
+    end
+})
+
+AimbotTab:CreateToggle({
+    Name = "Show Notifications",
+    CurrentValue = true,
+    Callback = function(value)
+        showAimNotifications = value
+    end
+})
+
+AimbotTab:CreateToggle({
+    Name = "Enable Prediction",
+    CurrentValue = true,
+    Callback = function(value)
+        predictionEnabled = value
+    end
+})
+
+AimbotTab:CreateSlider({
+    Name = "Prediction Amount",
+    Range = {0, 0.5},
+    Increment = 0.01,
+    CurrentValue = 0.15,
+    Callback = function(value)
+        predictionAmount = value
+    end
+})
+
+AimbotTab:CreateButton({
+    Name = "Test - Find Murderer",
+    Callback = function()
+        local murdererPos = getMurdererPosition()
+        if murdererPos then
+            local murdererName = nil
+            for _, plr in ipairs(Players:GetPlayers()) do
+                if plr ~= LocalPlayer and isAlive(plr) and isMurderer(plr) then
+                    murdererName = plr.Name
+                    break
+                end
+            end
+            Rayfield:Notify({
+                Title = "🎯 Murderer Found!",
+                Content = murdererName or "Unknown",
+                Duration = 3
+            })
+        else
+            Rayfield:Notify({
+                Title = "❌ No Murderer",
+                Content = "Murderer not found in game",
+                Duration = 3
+            })
+        end
+    end
+})
+
+AimbotTab:CreateButton({
+    Name = "Check Auto-Aim Status",
+    Callback = function()
+        if WeaponService then
+            Rayfield:Notify({
+                Title = "✅ Auto-Aim Status",
+                Content = "WeaponService: LOADED\nAuto-Aim: " .. (autoAimEnabled and "ON" or "OFF"),
+                Duration = 4
+            })
+        else
+            Rayfield:Notify({
+                Title = "❌ Auto-Aim Status",
+                Content = "WeaponService: NOT LOADED\nWaiting for game to load...",
+                Duration = 4
+            })
+        end
+    end
+})
+
+-- Combat Tab
 CombatTab:CreateSection("Combat")
 CombatTab:CreateToggle({Name = "Triggerbot (instant)", CurrentValue = false, Callback = function(v)
     TriggerbotEnabled = v
@@ -1284,6 +1493,7 @@ CombatTab:CreateSlider({Name = "Hitbox Size", Range = {5,50}, Increment = 5, Cur
     if HitboxEnabled then UpdateAllHitboxes() end
 end})
 
+-- Movement Tab
 MovementTab:CreateSection("Survival Exploits")
 GodModeToggleObj = MovementTab:CreateToggle({
     Name = "God Mode",
@@ -1388,6 +1598,7 @@ MovementTab:CreateButton({Name = "Respawn", Callback = respawn})
 MovementTab:CreateButton({Name = "Teleport to Gun (Snap Back)", Callback = TeleportToGunSnapBack})
 MovementTab:CreateToggle({Name = "Auto Teleport to Gun", CurrentValue = false, Callback = function(v) AutoGunTPEnabled = v end})
 
+-- Players Tab
 PlayersTab:CreateSection("Player Selector")
 local PlayerDropdown = PlayersTab:CreateDropdown({
     Name = "Select Player",
@@ -1435,6 +1646,6 @@ MovementTab:CreateLabel("P = Toggle GUI | Q = Aimbot | G = God Mode | Z = Desync
 Rayfield:LoadConfiguration()
 Rayfield:Notify({
     Title = "I Love Annie - MM2",
-    Content = "Script loaded",
+    Content = "Script loaded - Murderer Auto-Aim added! Toggle in Aimbot tab",
     Duration = 5,
 })
