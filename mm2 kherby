@@ -1,5 +1,4 @@
 local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
-
 local Window = Rayfield:CreateWindow({
     Name = "I Love Annie - MM2",
     LoadingTitle = "I Love Annie",
@@ -9,8 +8,8 @@ local Window = Rayfield:CreateWindow({
 })
 
 local VisualsTab = Window:CreateTab("Visuals", 4483362458)
-local AimbotTab = Window:CreateTab("Aimbot", 4483362458)
-local CombatTab = Window:CreateTab("Combat", 4483362458)
+local SheriffTab = Window:CreateTab("Sheriff", 4483362458)
+local MurdererTab = Window:CreateTab("Murderer", 4483362458)
 local MovementTab = Window:CreateTab("Movement", 4483362458)
 local PlayersTab = Window:CreateTab("Players", 4483362458)
 
@@ -21,7 +20,6 @@ local Workspace = game:GetService("Workspace")
 local LocalPlayer = Players.LocalPlayer
 local mouse = LocalPlayer:GetMouse()
 
--- WeaponService for Murderer Auto-Aim
 local WeaponService = nil
 local autoAimEnabled = false
 local aimOnlyWhenHolding = false
@@ -31,7 +29,6 @@ local predictionAmount = 0.15
 local originalGetTarget = nil
 local aimbotActive = false
 
--- Function to get WeaponService
 local function getWeaponService()
     local success, result = pcall(function()
         return require(game:GetService("ReplicatedStorage"):WaitForChild("ClientServices"):WaitForChild("WeaponService"))
@@ -42,7 +39,6 @@ local function getWeaponService()
     return nil
 end
 
--- Murderer detection functions
 local function isMurderer(plr)
     if not plr then return false end
     return (plr.Backpack:FindFirstChild("Knife") or (plr.Character and plr.Character:FindFirstChild("Knife")))
@@ -54,13 +50,22 @@ local function isAlive(plr)
     return hum and hum.Health > 0
 end
 
--- Find murderer position for auto-aim
+local function isSheriff(plr)
+    if not plr then return false end
+    local gunNames = {"Gun", "Revolver"}
+    for _, name in ipairs(gunNames) do
+        if plr.Backpack:FindFirstChild(name) or (plr.Character and plr.Character:FindFirstChild(name)) then
+            return true
+        end
+    end
+    return false
+end
+
 local function getMurdererPosition()
     for _, plr in ipairs(Players:GetPlayers()) do
         if plr ~= LocalPlayer and isAlive(plr) and isMurderer(plr) then
             local character = plr.Character
-            local targetPart = character:FindFirstChild("Head") or 
-                              character:FindFirstChild("HumanoidRootPart")
+            local targetPart = character:FindFirstChild("Head") or character:FindFirstChild("HumanoidRootPart")
             if targetPart then
                 return targetPart.Position
             end
@@ -69,7 +74,6 @@ local function getMurdererPosition()
     return nil
 end
 
--- Setup aimbot override
 local function setupAimbot()
     WeaponService = getWeaponService()
     if WeaponService and WeaponService.GetMouseTargetCFrame then
@@ -78,8 +82,7 @@ local function setupAimbot()
         WeaponService.GetMouseTargetCFrame = function(self)
             if autoAimEnabled then
                 if aimOnlyWhenHolding then
-                    if not (UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) or 
-                           UserInputService:IsKeyDown(Enum.KeyCode.RightShift)) then
+                    if not (UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) or UserInputService:IsKeyDown(Enum.KeyCode.RightShift)) then
                         return originalGetTarget(self)
                     end
                 end
@@ -100,8 +103,8 @@ local function setupAimbot()
                     
                     if showAimNotifications and not aimbotActive then
                         Rayfield:Notify({
-                            Title = "🎯 Murderer Locked",
-                            Content = "Auto-aim active!",
+                            Title = "Murderer Locked",
+                            Content = "Auto-aim active",
                             Duration = 1
                         })
                         aimbotActive = true
@@ -111,7 +114,7 @@ local function setupAimbot()
                 else
                     if aimbotActive and showAimNotifications then
                         Rayfield:Notify({
-                            Title = "❌ No Murderer",
+                            Title = "No Murderer",
                             Content = "Target lost",
                             Duration = 1
                         })
@@ -124,18 +127,16 @@ local function setupAimbot()
         
         if showAimNotifications then
             Rayfield:Notify({
-                Title = "✅ Auto-Aim Ready",
-                Content = "WeaponService hooked successfully!",
+                Title = "Auto-Aim Ready",
+                Content = "WeaponService hooked successfully",
                 Duration = 3
             })
         end
     end
 end
 
--- Try to setup aimbot immediately
 setupAimbot()
 
--- Keep trying if WeaponService loads later
 game:GetService("ReplicatedStorage").ChildAdded:Connect(function(child)
     if child.Name == "ClientServices" then
         task.wait(1)
@@ -230,17 +231,6 @@ local ESPEnabled = false
 local NameESPEnabled = true
 local FillTransparencyValue = 0.4
 
-local function isSheriff(plr)
-    if not plr then return false end
-    local gunNames = {"Gun", "Revolver"}
-    for _, name in ipairs(gunNames) do
-        if plr.Backpack:FindFirstChild(name) or (plr.Character and plr.Character:FindFirstChild(name)) then
-            return true
-        end
-    end
-    return false
-end
-
 local function getRoleColor(plr)
     if not plr or not plr.Character then return Color3.fromRGB(0, 255, 0) end
     if isMurderer(plr) then
@@ -261,7 +251,7 @@ end
 local function CreateESP(char, plr)
     if not char or not plr or plr == LocalPlayer then return end
     CleanupESP(char)
-   
+    
     local hl = Instance.new("Highlight")
     hl.Name = "MM2Highlight"
     hl.Adornee = char
@@ -270,6 +260,7 @@ local function CreateESP(char, plr)
     hl.FillTransparency = FillTransparencyValue
     hl.OutlineTransparency = 0
     hl.Parent = char
+    
     if NameESPEnabled then
         local adornee = char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart")
         if not adornee then return end
@@ -456,7 +447,7 @@ local function checkHealthForDesync()
        desync.LastHealth > healthPercent and
        (tick() - desync.LastTriggered) > desync.Cooldown then
         LocalTriggerDesyncOnce()
-        Rayfield:Notify({Title = "Auto Desync", Content = "Triggered by damage!", Duration = 3})
+        Rayfield:Notify({Title = "Auto Desync", Content = "Triggered by damage", Duration = 3})
     end
     desync.LastHealth = healthPercent
 end
@@ -469,7 +460,7 @@ local function checkAutoAvoidMurderer()
             if desync.Enabled then
                 desync.Enabled = false
                 if SetDesyncToggle then SetDesyncToggle(false) end
-                Rayfield:Notify({Title = "Auto Avoid", Content = "Disabled. Desync turned OFF.", Duration = 2})
+                Rayfield:Notify({Title = "Auto Avoid", Content = "Disabled. Desync turned OFF", Duration = 2})
             end
         end
         return
@@ -483,14 +474,14 @@ local function checkAutoAvoidMurderer()
             desync.Enabled = true
             desync.Method = "Sky"
             if SetDesyncToggle then SetDesyncToggle(true) end
-            Rayfield:Notify({Title = "Auto Avoid", Content = "Murderer near! Sky Desync ON", Duration = 2})
+            Rayfield:Notify({Title = "Auto Avoid", Content = "Murderer near - Sky Desync ON", Duration = 2})
         end
     else
         if desync.Enabled and desync.AutoAvoidActive then
             desync.Enabled = false
             desync.AutoAvoidActive = false
             if SetDesyncToggle then SetDesyncToggle(false) end
-            Rayfield:Notify({Title = "Auto Avoid", Content = "Murderer left. Desync turned OFF.", Duration = 2})
+            Rayfield:Notify({Title = "Auto Avoid", Content = "Murderer left - Desync OFF", Duration = 2})
         end
     end
 end
@@ -615,7 +606,7 @@ local SkidFling = function(TargetPlayer)
         task.wait()
     until (RootPart.Position - getgenv().OldPos.Position).Magnitude < 25
     workspace.FallenPartsDestroyHeight = getgenv().FPDH
-    FlingNotify("Fling Success", "Flung " .. TargetPlayer.Name .. "!", 3)
+    FlingNotify("Fling Success", "Flung " .. TargetPlayer.Name, 3)
 end
 
 local function destroyAllPlayerHighlights()
@@ -680,7 +671,7 @@ local function updateAimbot()
     end
     if targetPlr ~= LastLockedTarget then
         LastLockedTarget = targetPlr
-        Rayfield:Notify({Title = "Aimbot Locked!", Content = "-> "..targetPlr.Name..(isMurderer(targetPlr) and " (MURDERER)" or ""), Duration = 1.8})
+        Rayfield:Notify({Title = "Aimbot Locked", Content = "-> " .. targetPlr.Name .. (isMurderer(targetPlr) and " (MURDERER)" or ""), Duration = 1.8})
     end
 end
 
@@ -982,7 +973,7 @@ local function PerformKillAll()
     if not character then return end
     local Knife = LocalPlayer.Backpack:FindFirstChild("Knife") or character:FindFirstChild("Knife")
     if not Knife then
-        Rayfield:Notify({Title = "Kill All", Content = "No Knife (you must be Murderer)", Duration = 3})
+        Rayfield:Notify({Title = "Kill All", Content = "No Knife (must be Murderer)", Duration = 3})
         return
     end
     if Knife.Parent == LocalPlayer.Backpack then
@@ -1013,7 +1004,7 @@ local function TeleportToGunSnapBack()
     local currentMap = getCurrentMap()
     if currentMap and not gunDrop then gunDrop = currentMap:FindFirstChild("GunDrop") end
     if not gunDrop then
-        Rayfield:Notify({Title = "Gun TP", Content = "No Gun Dropped!", Duration = 2.5})
+        Rayfield:Notify({Title = "Gun TP", Content = "No Gun Dropped", Duration = 2.5})
         return
     end
     local char = LocalPlayer.Character
@@ -1029,7 +1020,7 @@ local function TeleportToGunSnapBack()
         if LastGunTPPosition and char and char:FindFirstChild("HumanoidRootPart") then
             char.HumanoidRootPart.CFrame = LastGunTPPosition
             LastGunTPPosition = nil
-            Rayfield:Notify({Title = "Gun TP", Content = "Snapped back!", Duration = 2.5})
+            Rayfield:Notify({Title = "Gun TP", Content = "Snapped back", Duration = 2.5})
         end
     end)
 end
@@ -1075,7 +1066,7 @@ end
 local function tpLobby()
     local char = LocalPlayer.Character
     if not char then
-        Rayfield:Notify({Title = "Error", Content = "Character not loaded!", Duration = 3})
+        Rayfield:Notify({Title = "Error", Content = "Character not loaded", Duration = 3})
         return
     end
     local hrp = char:FindFirstChild("HumanoidRootPart")
@@ -1111,7 +1102,7 @@ end
 local function tpMap()
     local char = LocalPlayer.Character
     if not char then
-        Rayfield:Notify({Title = "Error", Content = "Character not loaded!", Duration = 3})
+        Rayfield:Notify({Title = "Error", Content = "Character not loaded", Duration = 3})
         return
     end
     local hrp = char:FindFirstChild("HumanoidRootPart")
@@ -1124,7 +1115,7 @@ local function tpMap()
         local spawnPoint = getSpawnPoint(map)
         if spawnPoint then
             hrp.CFrame = spawnPoint.CFrame * CFrame.new(0, 5, 0)
-            Rayfield:Notify({Title = "Success", Content = "Teleported to map", Duration = 3})
+            Rayfield:Notify({Title = "Success", Content = "Teleported to Map", Duration = 3})
             return
         end
     end
@@ -1175,7 +1166,7 @@ local function FlingSelected()
     end
     local target = Players:FindFirstChild(SelectedPlayerName)
     if target and target ~= LocalPlayer and target.Character then
-        Rayfield:Notify({Title="Flinging...", Content="Using SkidFling on " .. target.Name, Duration=2})
+        Rayfield:Notify({Title="Flinging", Content="Using SkidFling on " .. target.Name, Duration=2})
         task.spawn(SkidFling, target)
     else
         Rayfield:Notify({Title="Error", Content="Target invalid", Duration=2})
@@ -1220,7 +1211,7 @@ Workspace.DescendantAdded:Connect(function(d)
     if d.Name == "GunDrop" then
         task.wait(0.1)
         if DroppedGunHighlightEnabled then highlightDroppedGun() end
-        Rayfield:Notify({Title = "Gun Dropped!", Content = "The gun has been dropped!", Duration = 4.5})
+        Rayfield:Notify({Title = "Gun Dropped", Content = "The gun has been dropped", Duration = 4.5})
         updateGunTracer()
         if AutoGunTPEnabled then
             TeleportToGunSnapBack()
@@ -1254,7 +1245,7 @@ UserInputService.InputBegan:Connect(function(input, gp)
         Rayfield:Notify({Title = "Hitbox Size", Content = tostring(HitboxSize), Duration = 1.5})
     elseif input.KeyCode == Enum.KeyCode.G then
         if not GodModeHotkeyUnlocked then
-            Rayfield:Notify({Title = "God Mode", Content = "Enable God Mode toggle first!", Duration = 3})
+            Rayfield:Notify({Title = "God Mode", Content = "Enable God Mode toggle first", Duration = 3})
             return
         end
         GodModeEnabled = not GodModeEnabled
@@ -1309,22 +1300,22 @@ end))
 
 -- Visuals Tab
 VisualsTab:CreateSection("Player ESP")
-VisualsTab:CreateToggle({Name = "ESP Highlight", CurrentValue = false, Callback = function(v)
+VisualsTab:CreateToggle({Name = "Enable Player Highlight", CurrentValue = false, Callback = function(v)
     ESPEnabled = v
     if v then ForceRefreshESP() else destroyAllPlayerHighlights() end
 end})
-VisualsTab:CreateToggle({Name = "Name ESP", CurrentValue = true, Callback = function(v)
+VisualsTab:CreateToggle({Name = "Enable Name Tags", CurrentValue = true, Callback = function(v)
     NameESPEnabled = v
     if ESPEnabled then ForceRefreshESP() end
 end})
-VisualsTab:CreateSlider({Name = "Fill Transparency", Range = {0,1}, Increment = 0.05, CurrentValue = 0.4, Callback = function(v)
+VisualsTab:CreateSlider({Name = "Highlight Fill Transparency", Range = {0,1}, Increment = 0.05, CurrentValue = 0.4, Callback = function(v)
     FillTransparencyValue = v
     UpdateAllESPColors()
 end})
 
 VisualsTab:CreateSection("Gun ESP")
-VisualsTab:CreateToggle({Name = "Tool Gun ESP", CurrentValue = true, Callback = function(v) GunESPEnabled = v refreshToolGunESP() end})
-VisualsTab:CreateToggle({Name = "GunDrop Highlight", CurrentValue = true, Callback = function(v)
+VisualsTab:CreateToggle({Name = "Enable Tool Gun ESP", CurrentValue = true, Callback = function(v) GunESPEnabled = v refreshToolGunESP() end})
+VisualsTab:CreateToggle({Name = "Enable GunDrop Highlight", CurrentValue = true, Callback = function(v)
     DroppedGunHighlightEnabled = v
     if not v then
         for _,o in ipairs(Workspace:GetDescendants()) do
@@ -1335,29 +1326,28 @@ VisualsTab:CreateToggle({Name = "GunDrop Highlight", CurrentValue = true, Callba
         end
     end
 end})
-VisualsTab:CreateToggle({Name = "Gun Tracer", CurrentValue = true, Callback = function(v)
+VisualsTab:CreateToggle({Name = "Enable Gun Tracer", CurrentValue = true, Callback = function(v)
     GunTracerEnabled = v
     if not v and CurrentGunTracer then CurrentGunTracer:Destroy() CurrentGunTracer = nil end
 end})
 
--- Aimbot Tab (Now includes both Camera Aimbot and Murderer Auto-Aim)
-AimbotTab:CreateSection("Camera Aimbot Settings")
-AimbotToggleObj = AimbotTab:CreateToggle({
-    Name = "Camera Aimbot (Press Q to toggle)",
+-- Sheriff Tab
+SheriffTab:CreateSection("Camera Aimbot")
+AimbotToggleObj = SheriffTab:CreateToggle({
+    Name = "Enable Camera Aimbot (Q to toggle)",
     CurrentValue = false,
     Callback = function(v) AimbotEnabled = v end
 })
-AimbotTab:CreateDropdown({Name = "Aim Part", Options = {"Head","UpperTorso","Torso","HumanoidRootPart","LowerTorso"}, CurrentOption = {"Head"}, Callback = function(v) TargetPart = v[1] end})
-AimbotTab:CreateToggle({Name = "Sticky Aimlock", CurrentValue = false, Callback = function(v) StickyEnabled = v if not v then LockedTarget = nil end end})
-AimbotTab:CreateToggle({Name = "Use Prediction", CurrentValue = true, Callback = function(v) PredictionEnabled = v end})
-AimbotTab:CreateSlider({Name = "Prediction (when enabled)", Range = {0,0.4}, Increment = 0.002, CurrentValue = 0.168, Callback = function(v) AimbotPrediction = v end})
-AimbotTab:CreateSlider({Name = "Smoothness (only when prediction ON)", Range = {0.1,0.9}, Increment = 0.01, CurrentValue = 0.42, Callback = function(v) AimbotSmoothness = v end})
-AimbotTab:CreateSlider({Name = "FOV", Range = {80,400}, Increment = 5, CurrentValue = 220, Callback = function(v) AimbotFOV = v end})
-AimbotTab:CreateToggle({Name = "Only Target Murderer", CurrentValue = false, Callback = function(v) AimbotOnlyMurderer = v end})
+SheriffTab:CreateDropdown({Name = "Aim Part", Options = {"Head","UpperTorso","Torso","HumanoidRootPart","LowerTorso"}, CurrentOption = {"Head"}, Callback = function(v) TargetPart = v[1] end})
+SheriffTab:CreateToggle({Name = "Enable Sticky Aimlock", CurrentValue = false, Callback = function(v) StickyEnabled = v if not v then LockedTarget = nil end end})
+SheriffTab:CreateToggle({Name = "Enable Prediction", CurrentValue = true, Callback = function(v) PredictionEnabled = v end})
+SheriffTab:CreateSlider({Name = "Prediction Strength", Range = {0,0.4}, Increment = 0.002, CurrentValue = 0.168, Callback = function(v) AimbotPrediction = v end})
+SheriffTab:CreateSlider({Name = "Smoothness", Range = {0.1,0.9}, Increment = 0.01, CurrentValue = 0.42, Callback = function(v) AimbotSmoothness = v end})
+SheriffTab:CreateSlider({Name = "Field of View", Range = {80,400}, Increment = 5, CurrentValue = 220, Callback = function(v) AimbotFOV = v end})
+SheriffTab:CreateToggle({Name = "Target Murderer Only", CurrentValue = false, Callback = function(v) AimbotOnlyMurderer = v end})
 
-AimbotTab:CreateSection("Murderer Auto-Aim (100% Hit Rate)")
-
-local MurdererAutoAimToggle = AimbotTab:CreateToggle({
+SheriffTab:CreateSection("Murderer Auto-Aim")
+SheriffTab:CreateToggle({
     Name = "Enable Murderer Auto-Aim",
     CurrentValue = false,
     Callback = function(value)
@@ -1367,38 +1357,34 @@ local MurdererAutoAimToggle = AimbotTab:CreateToggle({
         end
         Rayfield:Notify({
             Title = "Murderer Auto-Aim",
-            Content = value and "✅ ON - Every bullet hits murderer!" or "❌ OFF",
+            Content = value and "Enabled - 100% Hit Rate" or "Disabled",
             Duration = 2
         })
     end
 })
-
-AimbotTab:CreateToggle({
-    Name = "Only When Holding Shift",
+SheriffTab:CreateToggle({
+    Name = "Activate Only While Holding Shift",
     CurrentValue = false,
     Callback = function(value)
         aimOnlyWhenHolding = value
     end
 })
-
-AimbotTab:CreateToggle({
-    Name = "Show Notifications",
+SheriffTab:CreateToggle({
+    Name = "Show Status Notifications",
     CurrentValue = true,
     Callback = function(value)
         showAimNotifications = value
     end
 })
-
-AimbotTab:CreateToggle({
+SheriffTab:CreateToggle({
     Name = "Enable Prediction",
     CurrentValue = true,
     Callback = function(value)
         predictionEnabled = value
     end
 })
-
-AimbotTab:CreateSlider({
-    Name = "Prediction Amount",
+SheriffTab:CreateSlider({
+    Name = "Prediction Strength",
     Range = {0, 0.5},
     Increment = 0.01,
     CurrentValue = 0.15,
@@ -1406,9 +1392,8 @@ AimbotTab:CreateSlider({
         predictionAmount = value
     end
 })
-
-AimbotTab:CreateButton({
-    Name = "Test - Find Murderer",
+SheriffTab:CreateButton({
+    Name = "Test Murderer Detection",
     Callback = function()
         local murdererPos = getMurdererPosition()
         if murdererPos then
@@ -1420,55 +1405,56 @@ AimbotTab:CreateButton({
                 end
             end
             Rayfield:Notify({
-                Title = "🎯 Murderer Found!",
+                Title = "Murderer Found",
                 Content = murdererName or "Unknown",
                 Duration = 3
             })
         else
             Rayfield:Notify({
-                Title = "❌ No Murderer",
-                Content = "Murderer not found in game",
+                Title = "No Murderer",
+                Content = "Murderer not found",
                 Duration = 3
             })
         end
     end
 })
-
-AimbotTab:CreateButton({
+SheriffTab:CreateButton({
     Name = "Check Auto-Aim Status",
     Callback = function()
         if WeaponService then
             Rayfield:Notify({
-                Title = "✅ Auto-Aim Status",
+                Title = "Auto-Aim Status",
                 Content = "WeaponService: LOADED\nAuto-Aim: " .. (autoAimEnabled and "ON" or "OFF"),
                 Duration = 4
             })
         else
             Rayfield:Notify({
-                Title = "❌ Auto-Aim Status",
-                Content = "WeaponService: NOT LOADED\nWaiting for game to load...",
+                Title = "Auto-Aim Status",
+                Content = "WeaponService: NOT LOADED",
                 Duration = 4
             })
         end
     end
 })
 
--- Combat Tab
-CombatTab:CreateSection("Combat")
-CombatTab:CreateToggle({Name = "Triggerbot (instant)", CurrentValue = false, Callback = function(v)
+SheriffTab:CreateSection("Triggerbot")
+SheriffTab:CreateToggle({Name = "Enable Triggerbot", CurrentValue = false, Callback = function(v)
     TriggerbotEnabled = v
     if v then startTriggerbot() else if triggerConn then triggerConn:Disconnect() end end
 end})
-CombatTab:CreateSection("Rage Features")
-CombatTab:CreateToggle({Name = "Kill Aura", CurrentValue = false, Callback = function(Value)
+
+-- Murderer Tab
+MurdererTab:CreateSection("Rage Features")
+MurdererTab:CreateToggle({Name = "Enable Kill Aura", CurrentValue = false, Callback = function(Value)
     KillAuraEnabled = Value
-    Rayfield:Notify({Title = "Kill Aura", Content = Value and "ENABLED" or "DISABLED", Duration = 2})
+    Rayfield:Notify({Title = "Kill Aura", Content = Value and "Enabled" or "Disabled", Duration = 2})
 end})
-CombatTab:CreateSlider({Name = "Kill Aura Range", Range = {5,250}, Increment = 1, CurrentValue = 25, Callback = function(Value) KillAuraRange = Value end})
-CombatTab:CreateButton({Name = "Kill All (instant)", Callback = PerformKillAll})
-CombatTab:CreateKeybind({Name = "Kill All Hotkey", CurrentKeybind = "P", HoldToUse = false, Callback = PerformKillAll})
-CombatTab:CreateSection("Hitbox Expander")
-CombatTab:CreateToggle({Name = "Hitbox Expander", CurrentValue = false, Callback = function(v)
+MurdererTab:CreateSlider({Name = "Kill Aura Range", Range = {5,250}, Increment = 1, CurrentValue = 25, Callback = function(Value) KillAuraRange = Value end})
+MurdererTab:CreateButton({Name = "Kill All Players", Callback = PerformKillAll})
+MurdererTab:CreateKeybind({Name = "Kill All Hotkey", CurrentKeybind = "P", HoldToUse = false, Callback = PerformKillAll})
+
+MurdererTab:CreateSection("Hitbox Expander")
+MurdererTab:CreateToggle({Name = "Enable Hitbox Expander", CurrentValue = false, Callback = function(v)
     HitboxEnabled = v
     if v then
         for _,p in ipairs(Players:GetPlayers()) do
@@ -1480,23 +1466,23 @@ CombatTab:CreateToggle({Name = "Hitbox Expander", CurrentValue = false, Callback
         Rayfield:Notify({Title="Hitbox",Content="Disabled",Duration=2})
     end
 end})
-VisualizeHitboxToggleObj = CombatTab:CreateToggle({
-    Name = "Visualize Hitbox",
+VisualizeHitboxToggleObj = MurdererTab:CreateToggle({
+    Name = "Visualize Hitboxes",
     CurrentValue = false,
     Callback = function(v)
         VisualizeHitbox = v
         UpdateAllHitboxes()
     end
 })
-CombatTab:CreateSlider({Name = "Hitbox Size", Range = {5,50}, Increment = 5, CurrentValue = 10, Callback = function(v)
+MurdererTab:CreateSlider({Name = "Hitbox Size", Range = {5,50}, Increment = 5, CurrentValue = 10, Callback = function(v)
     HitboxSize = v
     if HitboxEnabled then UpdateAllHitboxes() end
 end})
 
 -- Movement Tab
-MovementTab:CreateSection("Survival Exploits")
+MovementTab:CreateSection("Survival Features")
 GodModeToggleObj = MovementTab:CreateToggle({
-    Name = "God Mode",
+    Name = "Enable God Mode",
     CurrentValue = false,
     Callback = function(v)
         GodModeEnabled = v
@@ -1507,7 +1493,7 @@ GodModeToggleObj = MovementTab:CreateToggle({
         Rayfield:Notify({Title="God Mode",Content=v and "ON" or "OFF",Duration=2})
     end
 })
-MovementTab:CreateToggle({Name = "Anti-Fling", CurrentValue = false, Callback = function(v)
+MovementTab:CreateToggle({Name = "Enable Anti-Fling", CurrentValue = false, Callback = function(v)
     AntiFlingEnabled = v
     Rayfield:Notify({Title="Anti-Fling",Content=v and "ON" or "OFF",Duration=2})
 end})
@@ -1543,18 +1529,19 @@ MovementTab:CreateDropdown({
     Callback = function(v) getgenv().Desync.Method = v end,
 })
 MovementTab:CreateToggle({
-    Name = "Return to Position",
+    Name = "Return to Original Position",
     CurrentValue = true,
     Callback = function(v) getgenv().Desync.ReturnToPosition = v end,
 })
+
 MovementTab:CreateSection("Auto Desync on Damage")
 MovementTab:CreateToggle({
-    Name = "Auto Desync on Damage",
+    Name = "Enable Auto Desync on Damage",
     CurrentValue = false,
     Callback = function(v) getgenv().Desync.AutoDesyncOnDamage = v end,
 })
 MovementTab:CreateSlider({
-    Name = "Health % to Trigger",
+    Name = "Health Threshold (%)",
     Range = {1,100},
     Increment = 1,
     CurrentValue = 90,
@@ -1567,18 +1554,20 @@ MovementTab:CreateSlider({
     CurrentValue = 1,
     Callback = function(v) getgenv().Desync.Cooldown = v end,
 })
+
 MovementTab:CreateSection("Method Settings")
 MovementTab:CreateSlider({Name = "Random Distance", Range = {10,500}, Increment = 10, CurrentValue = 100, Callback = function(v) getgenv().Desync.RandomDistance = v end})
 MovementTab:CreateSlider({Name = "Oscillate Distance", Range = {10,200}, Increment = 5, CurrentValue = 50, Callback = function(v) getgenv().Desync.OscillateDistance = v end})
 MovementTab:CreateSlider({Name = "Oscillate Speed", Range = {1,20}, Increment = 0.5, CurrentValue = 5, Callback = function(v) getgenv().Desync.OscillateSpeed = v end})
 MovementTab:CreateSlider({Name = "Spin Speed", Range = {5,100}, Increment = 5, CurrentValue = 20, Callback = function(v) getgenv().Desync.SpinSpeed = v end})
-MovementTab:CreateSection("Auto Avoid Murderer (Sky Desync)")
+
+MovementTab:CreateSection("Auto Avoid Murderer")
 MovementTab:CreateToggle({
-    Name = "Auto Avoid Murderer",
+    Name = "Enable Auto Avoid Murderer",
     CurrentValue = false,
     Callback = function(v)
         getgenv().Desync.AutoAvoidMurderer = v
-        Rayfield:Notify({Title = "Auto Avoid", Content = v and "ENABLED" or "DISABLED", Duration = 2})
+        Rayfield:Notify({Title = "Auto Avoid", Content = v and "Enabled" or "Disabled", Duration = 2})
     end,
 })
 MovementTab:CreateSlider({
@@ -1588,7 +1577,7 @@ MovementTab:CreateSlider({
     CurrentValue = 20,
     Callback = function(v) getgenv().Desync.AvoidDistance = v end,
 })
-MovementTab:CreateLabel("Auto Sky desync when murderer is near.")
+MovementTab:CreateLabel("Sky desync activates automatically when a murderer is nearby.")
 
 MovementTab:CreateSection("Teleports")
 MovementTab:CreateButton({Name = "Teleport to Lobby", Callback = tpLobby})
@@ -1596,7 +1585,7 @@ MovementTab:CreateButton({Name = "Teleport to Current Map", Callback = tpMap})
 MovementTab:CreateButton({Name = "Emergency Teleport", Callback = tpEmergency})
 MovementTab:CreateButton({Name = "Respawn", Callback = respawn})
 MovementTab:CreateButton({Name = "Teleport to Gun (Snap Back)", Callback = TeleportToGunSnapBack})
-MovementTab:CreateToggle({Name = "Auto Teleport to Gun", CurrentValue = false, Callback = function(v) AutoGunTPEnabled = v end})
+MovementTab:CreateToggle({Name = "Enable Auto Teleport to Gun", CurrentValue = false, Callback = function(v) AutoGunTPEnabled = v end})
 
 -- Players Tab
 PlayersTab:CreateSection("Player Selector")
@@ -1613,7 +1602,7 @@ PlayersTab:CreateButton({
     Name = "Refresh Player List",
     Callback = function()
         PlayerDropdown:Refresh(GetPlayerNames())
-        Rayfield:Notify({Title = "Players", Content = "List updated!", Duration = 2})
+        Rayfield:Notify({Title = "Players", Content = "List updated", Duration = 2})
     end
 })
 PlayersTab:CreateSection("Actions")
@@ -1624,7 +1613,7 @@ PlayersTab:CreateToggle({
     CurrentValue = false,
     Callback = function(state)
         if state then
-            if not SelectedPlayerName then Rayfield:Notify({Title = "Spectate", Content = "Select a player first!", Duration = 2.5}) return end
+            if not SelectedPlayerName then Rayfield:Notify({Title = "Spectate", Content = "Select a player first", Duration = 2.5}) return end
             local target = Players:FindFirstChild(SelectedPlayerName)
             if target and target.Character and target.Character:FindFirstChild("Humanoid") then
                 OriginalCameraSubject = Workspace.CurrentCamera.CameraSubject
@@ -1641,11 +1630,11 @@ PlayersTab:CreateToggle({
     end
 })
 
-MovementTab:CreateLabel("P = Toggle GUI | Q = Aimbot | G = God Mode | Z = Desync | U = Hitbox Visuals")
+MovementTab:CreateLabel("Hotkeys: P = Toggle GUI | Q = Camera Aimbot | G = God Mode | Z = Desync | U = Hitbox Visuals")
 
 Rayfield:LoadConfiguration()
 Rayfield:Notify({
     Title = "I Love Annie - MM2",
-    Content = "Script loaded - Murderer Auto-Aim added! Toggle in Aimbot tab",
+    Content = "Script loaded successfully. Sheriff and Murderer features separated.",
     Duration = 5,
 })
