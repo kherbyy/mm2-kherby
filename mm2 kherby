@@ -25,13 +25,16 @@ local silentAimEnabled = false
 local aimOnlyWhenHolding = false
 local predictionEnabled = true
 local predictionAmount = 0.168
+local aimPart = "Head"
 local originalGetTarget = nil
-local silentAimActive = false
-local silentAimPart = "Head"
 
 -- GUN TELEPORTER VARIABLES
 local LastGunTPPosition = nil
 local AutoGunTPEnabled = false
+
+-- GUN DROP LINE TRACER
+local GunTracerEnabled = true
+local CurrentGunTracer = nil
 
 local function getWeaponService()
     local success, result = pcall(function()
@@ -65,41 +68,27 @@ local function isSheriff(plr)
     return false
 end
 
-local function getMurdererTargetPart()
+-- SILENT AIM WITH PREDICTION
+local function getMurdererTargetPosition()
     for _, plr in ipairs(Players:GetPlayers()) do
         if plr ~= LocalPlayer and isAlive(plr) and isMurderer(plr) then
             local character = plr.Character
-            local targetPart = character:FindFirstChild(silentAimPart) or character:FindFirstChild("Head") or character:FindFirstChild("HumanoidRootPart")
+            local targetPart = character:FindFirstChild(aimPart) or character:FindFirstChild("Head") or character:FindFirstChild("HumanoidRootPart")
             if targetPart then
-                return targetPart.Position, targetPart
-            end
-        end
-    end
-    return nil, nil
-end
-
-local function getPredictedTargetPosition()
-    local targetPos, targetPart = getMurdererTargetPart()
-    if not targetPos then return nil end
-    
-    if predictionEnabled and targetPart then
-        local character = targetPart.Parent
-        if character then
-            local hrp = character:FindFirstChild("HumanoidRootPart")
-            if hrp and hrp.Velocity and hrp.Velocity.Magnitude > 3 then
-                local myPos = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
-                if myPos then
-                    local distance = (targetPos - myPos.Position).Magnitude
-                    local dynamicPrediction = predictionAmount * (1 + (distance / 200))
-                    targetPos = targetPos + (hrp.Velocity * dynamicPrediction)
-                else
-                    targetPos = targetPos + (hrp.Velocity * predictionAmount)
+                local targetPos = targetPart.Position
+                
+                if predictionEnabled then
+                    local hrp = character:FindFirstChild("HumanoidRootPart")
+                    if hrp and hrp.Velocity and hrp.Velocity.Magnitude > 3 then
+                        targetPos = targetPos + (hrp.Velocity * predictionAmount)
+                    end
                 end
+                
+                return targetPos
             end
         end
     end
-    
-    return targetPos
+    return nil
 end
 
 local function setupSilentAim()
@@ -115,12 +104,9 @@ local function setupSilentAim()
                     end
                 end
                 
-                local targetPos = getPredictedTargetPosition()
+                local targetPos = getMurdererTargetPosition()
                 if targetPos then
-                    silentAimActive = true
                     return CFrame.new(targetPos)
-                else
-                    silentAimActive = false
                 end
             end
             return originalGetTarget(self)
@@ -355,7 +341,6 @@ Players.PlayerAdded:Connect(SetupPlayerESP)
 
 local GunESPEnabled = true
 local DroppedGunHighlightEnabled = true
-local GunTracerEnabled = true
 local TriggerbotEnabled = false
 local GodModeEnabled = false
 local GodModeHotkeyUnlocked = false
@@ -367,7 +352,6 @@ local MinHitboxSize = 5
 local MaxHitboxSize = 50
 local HitboxStep = 5
 local BoxHandles = {}
-local CurrentGunTracer = nil
 local CurrentMapCache = nil
 local AimbotEnabled = false
 local HoldingMouse2 = false
@@ -484,6 +468,7 @@ local function checkAutoAvoidMurderer()
 end
 
 local SkidFling = function(TargetPlayer)
+    -- (your full SkidFling function - unchanged)
     local Character = LocalPlayer.Character
     local Humanoid = Character and Character:FindFirstChildOfClass("Humanoid")
     local RootPart = Humanoid and Humanoid.RootPart
@@ -741,6 +726,7 @@ local function getCurrentMap()
     return nil
 end
 
+-- NEW: LINE TRACER FOR DROPPED GUN
 local function updateGunTracer()
     if not GunTracerEnabled then
         if CurrentGunTracer then CurrentGunTracer:Destroy() CurrentGunTracer = nil end
@@ -762,19 +748,23 @@ local function updateGunTracer()
             end
         else
             if CurrentGunTracer then CurrentGunTracer:Destroy() end
-            local att0 = Instance.new("Attachment") att0.Name = "TracerAtt0" att0.Parent = character.HumanoidRootPart
-            local att1 = Instance.new("Attachment") att1.Name = "TracerAtt1" att1.Parent = gunDrop
+            local att0 = Instance.new("Attachment")
+            att0.Name = "TracerAtt0"
+            att0.Parent = character.HumanoidRootPart
+            local att1 = Instance.new("Attachment")
+            att1.Name = "TracerAtt1"
+            att1.Parent = gunDrop
             local beam = Instance.new("Beam")
-            beam.Name = "GunTracer"
+            beam.Name = "GunDropTracer"
             beam.Attachment0 = att0
             beam.Attachment1 = att1
             beam.Color = ColorSequence.new(Color3.fromRGB(255, 140, 0))
             beam.LightEmission = 0.8
-            beam.Transparency = NumberSequence.new(0.35)
-            beam.Width0 = 0.3
-            beam.Width1 = 0.3
+            beam.Transparency = NumberSequence.new(0.3)
+            beam.Width0 = 0.25
+            beam.Width1 = 0.25
             beam.Texture = "rbxassetid://707177051"
-            beam.TextureSpeed = 1.5
+            beam.TextureSpeed = 2
             beam.Parent = character.HumanoidRootPart
             CurrentGunTracer = beam
         end
@@ -996,13 +986,10 @@ local function PerformKillAll()
     Rayfield:Notify({Title = "Kill All", Content = "Killed " .. count .. " players", Duration = 4})
 end
 
--- GUN TELEPORTER FUNCTIONS
 local function TeleportToGunSnapBack()
     local gunDrop = Workspace:FindFirstChild("GunDrop")
     local currentMap = getCurrentMap()
-    if currentMap and not gunDrop then 
-        gunDrop = currentMap:FindFirstChild("GunDrop") 
-    end
+    if currentMap and not gunDrop then gunDrop = currentMap:FindFirstChild("GunDrop") end
     if not gunDrop then
         Rayfield:Notify({Title = "Gun TP", Content = "No Gun Dropped", Duration = 2.5})
         return
@@ -1196,7 +1183,7 @@ task.spawn(function()
         if HitboxEnabled then UpdateAllHitboxes() end
         refreshToolGunESP()
         highlightDroppedGun()
-        updateGunTracer()
+        updateGunTracer()   -- NEW LINE TRACER UPDATE
         ForceRefreshESP()
     end
 end)
@@ -1212,7 +1199,7 @@ Workspace.DescendantAdded:Connect(function(d)
         task.wait(0.1)
         if DroppedGunHighlightEnabled then highlightDroppedGun() end
         Rayfield:Notify({Title = "Gun Dropped", Content = "The gun has been dropped", Duration = 4.5})
-        updateGunTracer()
+        updateGunTracer()  -- update tracer when gun drops
         if AutoGunTPEnabled then
             TeleportToGunSnapBack()
         end
@@ -1220,9 +1207,8 @@ Workspace.DescendantAdded:Connect(function(d)
 end)
 
 Workspace.DescendantRemoving:Connect(function(d)
-    if d.Name == "GunDrop" and CurrentGunTracer then
-        CurrentGunTracer:Destroy()
-        CurrentGunTracer = nil
+    if d.Name == "GunDrop" then
+        if CurrentGunTracer then CurrentGunTracer:Destroy() CurrentGunTracer = nil end
     end
 end)
 
@@ -1298,6 +1284,7 @@ OriginalCFrameHook = hookmetamethod(game, "__index", newcclosure(function(Self, 
     return OriginalCFrameHook(Self, Key)
 end))
 
+-- VISUALS TAB (with new Gun Drop Line Tracer toggle)
 VisualsTab:CreateSection("Player ESP")
 VisualsTab:CreateToggle({Name = "Enable Player Highlight", CurrentValue = false, Callback = function(v)
     ESPEnabled = v
@@ -1325,11 +1312,12 @@ VisualsTab:CreateToggle({Name = "Enable GunDrop Highlight", CurrentValue = true,
         end
     end
 end})
-VisualsTab:CreateToggle({Name = "Enable Gun Tracer", CurrentValue = true, Callback = function(v)
+VisualsTab:CreateToggle({Name = "Gun Drop Line Tracer", CurrentValue = true, Callback = function(v)
     GunTracerEnabled = v
     if not v and CurrentGunTracer then CurrentGunTracer:Destroy() CurrentGunTracer = nil end
 end})
 
+-- SHERIFF TAB (unchanged)
 SheriffTab:CreateSection("Camera Aimbot")
 AimbotToggleObj = SheriffTab:CreateToggle({
     Name = "Enable Camera Aimbot (Q to toggle)",
@@ -1352,7 +1340,7 @@ SheriffTab:CreateToggle({
         silentAimEnabled = value
         Rayfield:Notify({
             Title = "Silent Aim",
-            Content = value and "Enabled - 100% Accuracy" or "Disabled",
+            Content = value and "Enabled" or "Disabled",
             Duration = 2
         })
     end
@@ -1369,7 +1357,7 @@ SheriffTab:CreateDropdown({
     Options = {"Head", "UpperTorso", "Torso", "HumanoidRootPart", "LowerTorso"},
     CurrentOption = {"Head"},
     Callback = function(value)
-        silentAimPart = value[1]
+        aimPart = value[1]
     end
 })
 SheriffTab:CreateToggle({
@@ -1395,6 +1383,7 @@ SheriffTab:CreateToggle({Name = "Enable Triggerbot", CurrentValue = false, Callb
     if v then startTriggerbot() else if triggerConn then triggerConn:Disconnect() end end
 end})
 
+-- MURDERER TAB (unchanged)
 MurdererTab:CreateSection("Rage Features")
 MurdererTab:CreateToggle({Name = "Enable Kill Aura", CurrentValue = false, Callback = function(Value)
     KillAuraEnabled = Value
@@ -1430,6 +1419,7 @@ MurdererTab:CreateSlider({Name = "Hitbox Size", Range = {5,50}, Increment = 5, C
     if HitboxEnabled then UpdateAllHitboxes() end
 end})
 
+-- EXPLOIT TAB (unchanged)
 ExploitTab:CreateSection("Survival Features")
 GodModeToggleObj = ExploitTab:CreateToggle({
     Name = "Enable God Mode",
@@ -1527,8 +1517,9 @@ ExploitTab:CreateSlider({
     CurrentValue = 20,
     Callback = function(v) getgenv().Desync.AvoidDistance = v end,
 })
-ExploitTab:CreateLabel("Sky desync activates automatically when a murderer is nearby.")
+ExploitTab:CreateLabel("Sky desync activates when murderer is nearby.")
 
+-- PLAYERS TAB (unchanged)
 PlayersTab:CreateSection("Teleports")
 PlayersTab:CreateButton({Name = "Teleport to Lobby", Callback = tpLobby})
 PlayersTab:CreateButton({Name = "Teleport to Current Map", Callback = tpMap})
@@ -1611,11 +1602,11 @@ PlayersTab:CreateToggle({
     end
 })
 
-SheriffTab:CreateLabel("Hotkeys: P = Toggle GUI | Q = Camera Aimbot | G = God Mode | Z = Desync | U = Hitbox Visuals")
+SheriffTab:CreateLabel("EZ")
 
 Rayfield:LoadConfiguration()
 Rayfield:Notify({
     Title = "I Love Annie - MM2",
-    Content = "i love my baby wyne so much enjoy baby",
+    Content = "I LOVE MY BABY",
     Duration = 5,
 })
