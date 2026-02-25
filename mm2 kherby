@@ -29,6 +29,10 @@ local originalGetTarget = nil
 local silentAimActive = false
 local silentAimPart = "Head"
 
+-- GUN TELEPORTER VARIABLES
+local LastGunTPPosition = nil
+local AutoGunTPEnabled = false
+
 local function getWeaponService()
     local success, result = pcall(function()
         return require(game:GetService("ReplicatedStorage"):WaitForChild("ClientServices"):WaitForChild("WeaponService"))
@@ -379,8 +383,6 @@ local LastLockedTarget = nil
 local KillAuraEnabled = false
 local KillAuraRange = 25
 local lastAttack = tick()
-local LastGunTPPosition = nil
-local AutoGunTPEnabled = false
 local SelectedPlayerName = nil
 local OriginalCameraSubject = nil
 local AimbotToggleObj, GodModeToggleObj, VisualizeHitboxToggleObj, DesyncToggleObj
@@ -992,6 +994,35 @@ local function PerformKillAll()
         end
     end
     Rayfield:Notify({Title = "Kill All", Content = "Killed " .. count .. " players", Duration = 4})
+end
+
+-- GUN TELEPORTER FUNCTIONS
+local function TeleportToGunSnapBack()
+    local gunDrop = Workspace:FindFirstChild("GunDrop")
+    local currentMap = getCurrentMap()
+    if currentMap and not gunDrop then 
+        gunDrop = currentMap:FindFirstChild("GunDrop") 
+    end
+    if not gunDrop then
+        Rayfield:Notify({Title = "Gun TP", Content = "No Gun Dropped", Duration = 2.5})
+        return
+    end
+    local char = LocalPlayer.Character
+    if not char or not char:FindFirstChild("HumanoidRootPart") then return end
+    LastGunTPPosition = char.HumanoidRootPart.CFrame
+    Rayfield:Notify({Title = "Gun TP", Content = "Snapping to gun...", Duration = 1.5})
+    task.spawn(function()
+        local timeout = tick()
+        while (tick() - timeout) < 2 and gunDrop.Parent do
+            char.HumanoidRootPart.CFrame = gunDrop.CFrame
+            RunService.Stepped:Wait()
+        end
+        if LastGunTPPosition and char and char:FindFirstChild("HumanoidRootPart") then
+            char.HumanoidRootPart.CFrame = LastGunTPPosition
+            LastGunTPPosition = nil
+            Rayfield:Notify({Title = "Gun TP", Content = "Snapped back", Duration = 2.5})
+        end
+    end)
 end
 
 local function findLobby()
