@@ -1,4 +1,4 @@
-local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield  '))()
+local Rayfield = loadstring(game:HttpGet('https://sirius.menu/rayfield'))()
 local Window = Rayfield:CreateWindow({
     Name = "I Love Annie - MM2",
     LoadingTitle = "I Love Annie",
@@ -21,12 +21,13 @@ local LocalPlayer = Players.LocalPlayer
 local mouse = LocalPlayer:GetMouse()
 
 local WeaponService = nil
-local autoAimEnabled = false
+local silentAimEnabled = false
 local aimOnlyWhenHolding = false
 local predictionEnabled = true
-local predictionAmount = 0.165
+local predictionAmount = 0.168
 local originalGetTarget = nil
-local aimbotActive = false
+local silentAimActive = false
+local silentAimPart = "Head"
 
 local function getWeaponService()
     local success, result = pcall(function()
@@ -60,78 +61,81 @@ local function isSheriff(plr)
     return false
 end
 
-local function getMurderer()
+local function getMurdererTargetPart()
     for _, plr in ipairs(Players:GetPlayers()) do
         if plr ~= LocalPlayer and isAlive(plr) and isMurderer(plr) then
-            return plr
+            local character = plr.Character
+            local targetPart = character:FindFirstChild(silentAimPart) or character:FindFirstChild("Head") or character:FindFirstChild("HumanoidRootPart")
+            if targetPart then
+                return targetPart.Position, targetPart
+            end
         end
     end
-    return nil
+    return nil, nil
 end
 
-local function getMurdererPosition()
-    local murderer = getMurderer()
-    if murderer and murderer.Character then
-        local character = murderer.Character
-        local targetPart = character:FindFirstChild("Head") or character:FindFirstChild("HumanoidRootPart")
-        if targetPart then
-            return targetPart.Position, targetPart, murderer
-        end
-    end
-    return nil, nil, nil
-end
-
-local function getPredictedMurdererPosition()
-    local murderer = getMurderer()
-    if not murderer or not murderer.Character then return nil end
+local function getPredictedTargetPosition()
+    local targetPos, targetPart = getMurdererTargetPart()
+    if not targetPos then return nil end
     
-    local targetPart = murderer.Character:FindFirstChild("Head") or murderer.Character:FindFirstChild("HumanoidRootPart")
-    if not targetPart then return nil end
-    
-    local hrp = murderer.Character:FindFirstChild("HumanoidRootPart")
-    if hrp and predictionEnabled then
-        local velocity = hrp.Velocity
-        if velocity.Magnitude > 0.1 then
-            return targetPart.Position + (velocity * predictionAmount)
+    if predictionEnabled and targetPart then
+        local character = targetPart.Parent
+        if character then
+            local hrp = character:FindFirstChild("HumanoidRootPart")
+            if hrp and hrp.Velocity and hrp.Velocity.Magnitude > 3 then
+                local myPos = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart")
+                if myPos then
+                    local distance = (targetPos - myPos.Position).Magnitude
+                    local dynamicPrediction = predictionAmount * (1 + (distance / 200))
+                    targetPos = targetPos + (hrp.Velocity * dynamicPrediction)
+                else
+                    targetPos = targetPos + (hrp.Velocity * predictionAmount)
+                end
+            end
         end
     end
-    return targetPart.Position
+    
+    return targetPos
 end
 
-local function setupAimbot()
+local function setupSilentAim()
     WeaponService = getWeaponService()
     if WeaponService and WeaponService.GetMouseTargetCFrame then
         originalGetTarget = WeaponService.GetMouseTargetCFrame
         
         WeaponService.GetMouseTargetCFrame = function(self)
-            if autoAimEnabled then
+            if silentAimEnabled then
                 if aimOnlyWhenHolding then
                     if not (UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) or UserInputService:IsKeyDown(Enum.KeyCode.RightShift)) then
                         return originalGetTarget(self)
                     end
                 end
                 
-                local predictedPos = getPredictedMurdererPosition()
-                if predictedPos then
-                    if not aimbotActive then
-                        aimbotActive = true
-                    end
-                    return CFrame.new(predictedPos)
+                local targetPos = getPredictedTargetPosition()
+                if targetPos then
+                    silentAimActive = true
+                    return CFrame.new(targetPos)
                 else
-                    aimbotActive = false
+                    silentAimActive = false
                 end
             end
             return originalGetTarget(self)
         end
+        
+        Rayfield:Notify({
+            Title = "Silent Aim Ready",
+            Content = "WeaponService hooked successfully",
+            Duration = 2
+        })
     end
 end
 
-setupAimbot()
+setupSilentAim()
 
 game:GetService("ReplicatedStorage").ChildAdded:Connect(function(child)
     if child.Name == "ClientServices" then
         task.wait(1)
-        setupAimbot()
+        setupSilentAim()
     end
 end)
 
@@ -990,32 +994,6 @@ local function PerformKillAll()
     Rayfield:Notify({Title = "Kill All", Content = "Killed " .. count .. " players", Duration = 4})
 end
 
-local function TeleportToGunSnapBack()
-    local gunDrop = Workspace:FindFirstChild("GunDrop")
-    local currentMap = getCurrentMap()
-    if currentMap and not gunDrop then gunDrop = currentMap:FindFirstChild("GunDrop") end
-    if not gunDrop then
-        Rayfield:Notify({Title = "Gun TP", Content = "No Gun Dropped", Duration = 2.5})
-        return
-    end
-    local char = LocalPlayer.Character
-    if not char or not char:FindFirstChild("HumanoidRootPart") then return end
-    LastGunTPPosition = char.HumanoidRootPart.CFrame
-    Rayfield:Notify({Title = "Gun TP", Content = "Snapping to gun...", Duration = 1.5})
-    task.spawn(function()
-        local timeout = tick()
-        while (tick() - timeout) < 2 and gunDrop.Parent do
-            char.HumanoidRootPart.CFrame = gunDrop.CFrame
-            RunService.Stepped:Wait()
-        end
-        if LastGunTPPosition and char and char:FindFirstChild("HumanoidRootPart") then
-            char.HumanoidRootPart.CFrame = LastGunTPPosition
-            LastGunTPPosition = nil
-            Rayfield:Notify({Title = "Gun TP", Content = "Snapped back", Duration = 2.5})
-        end
-    end)
-end
-
 local function findLobby()
     local lobby = Workspace:FindFirstChild("Lobby")
     if lobby then return lobby end
@@ -1289,7 +1267,6 @@ OriginalCFrameHook = hookmetamethod(game, "__index", newcclosure(function(Self, 
     return OriginalCFrameHook(Self, Key)
 end))
 
--- Visuals Tab
 VisualsTab:CreateSection("Player ESP")
 VisualsTab:CreateToggle({Name = "Enable Player Highlight", CurrentValue = false, Callback = function(v)
     ESPEnabled = v
@@ -1322,7 +1299,6 @@ VisualsTab:CreateToggle({Name = "Enable Gun Tracer", CurrentValue = true, Callba
     if not v and CurrentGunTracer then CurrentGunTracer:Destroy() CurrentGunTracer = nil end
 end})
 
--- Sheriff Tab
 SheriffTab:CreateSection("Camera Aimbot")
 AimbotToggleObj = SheriffTab:CreateToggle({
     Name = "Enable Camera Aimbot (Q to toggle)",
@@ -1342,13 +1318,10 @@ SheriffTab:CreateToggle({
     Name = "Enable Silent Aim",
     CurrentValue = false,
     Callback = function(value)
-        autoAimEnabled = value
-        if not value then
-            aimbotActive = false
-        end
+        silentAimEnabled = value
         Rayfield:Notify({
             Title = "Silent Aim",
-            Content = value and "Enabled - 100% Hit Rate" or "Disabled",
+            Content = value and "Enabled - 100% Accuracy" or "Disabled",
             Duration = 2
         })
     end
@@ -1358,6 +1331,14 @@ SheriffTab:CreateToggle({
     CurrentValue = false,
     Callback = function(value)
         aimOnlyWhenHolding = value
+    end
+})
+SheriffTab:CreateDropdown({
+    Name = "Aim Part",
+    Options = {"Head", "UpperTorso", "Torso", "HumanoidRootPart", "LowerTorso"},
+    CurrentOption = {"Head"},
+    Callback = function(value)
+        silentAimPart = value[1]
     end
 })
 SheriffTab:CreateToggle({
@@ -1371,7 +1352,7 @@ SheriffTab:CreateSlider({
     Name = "Prediction Strength",
     Range = {0, 0.5},
     Increment = 0.01,
-    CurrentValue = 0.165,
+    CurrentValue = 0.168,
     Callback = function(value)
         predictionAmount = value
     end
@@ -1383,7 +1364,6 @@ SheriffTab:CreateToggle({Name = "Enable Triggerbot", CurrentValue = false, Callb
     if v then startTriggerbot() else if triggerConn then triggerConn:Disconnect() end end
 end})
 
--- Murderer Tab
 MurdererTab:CreateSection("Rage Features")
 MurdererTab:CreateToggle({Name = "Enable Kill Aura", CurrentValue = false, Callback = function(Value)
     KillAuraEnabled = Value
@@ -1419,7 +1399,6 @@ MurdererTab:CreateSlider({Name = "Hitbox Size", Range = {5,50}, Increment = 5, C
     if HitboxEnabled then UpdateAllHitboxes() end
 end})
 
--- Exploit Tab (formerly Movement)
 ExploitTab:CreateSection("Survival Features")
 GodModeToggleObj = ExploitTab:CreateToggle({
     Name = "Enable God Mode",
@@ -1519,7 +1498,16 @@ ExploitTab:CreateSlider({
 })
 ExploitTab:CreateLabel("Sky desync activates automatically when a murderer is nearby.")
 
--- Players Tab
+PlayersTab:CreateSection("Teleports")
+PlayersTab:CreateButton({Name = "Teleport to Lobby", Callback = tpLobby})
+PlayersTab:CreateButton({Name = "Teleport to Current Map", Callback = tpMap})
+PlayersTab:CreateButton({Name = "Emergency Teleport", Callback = tpEmergency})
+PlayersTab:CreateButton({Name = "Respawn", Callback = respawn})
+
+PlayersTab:CreateSection("GUN TELEPORTER")
+PlayersTab:CreateButton({Name = "Teleport to Gun (Snap Back)", Callback = TeleportToGunSnapBack})
+PlayersTab:CreateToggle({Name = "Enable Auto Teleport to Gun", CurrentValue = false, Callback = function(v) AutoGunTPEnabled = v end})
+
 PlayersTab:CreateSection("Player Selector")
 local PlayerDropdown = PlayersTab:CreateDropdown({
     Name = "Select Player",
@@ -1538,9 +1526,38 @@ PlayersTab:CreateButton({
     end
 })
 
-PlayersTab:CreateSection("Actions")
+PlayersTab:CreateSection("Player Actions")
 PlayersTab:CreateButton({Name = "Teleport to Player", Callback = TeleportToSelected})
 PlayersTab:CreateButton({Name = "Fling Player", Callback = FlingSelected})
+PlayersTab:CreateButton({Name = "Fling Sheriff", Callback = function()
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer and isAlive(plr) and isSheriff(plr) then
+            task.spawn(SkidFling, plr)
+            Rayfield:Notify({Title = "Flinging Sheriff", Content = "Flung " .. plr.Name, Duration = 2})
+            break
+        end
+    end
+end})
+PlayersTab:CreateButton({Name = "Fling Murderer", Callback = function()
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer and isAlive(plr) and isMurderer(plr) then
+            task.spawn(SkidFling, plr)
+            Rayfield:Notify({Title = "Flinging Murderer", Content = "Flung " .. plr.Name, Duration = 2})
+            break
+        end
+    end
+end})
+PlayersTab:CreateButton({Name = "Fling All", Callback = function()
+    local count = 0
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer and isAlive(plr) then
+            task.spawn(SkidFling, plr)
+            count = count + 1
+            task.wait(0.1)
+        end
+    end
+    Rayfield:Notify({Title = "Fling All", Content = "Flung " .. count .. " players", Duration = 3})
+end})
 PlayersTab:CreateToggle({
     Name = "Spectate Selected Player",
     CurrentValue = false,
@@ -1563,19 +1580,11 @@ PlayersTab:CreateToggle({
     end
 })
 
-PlayersTab:CreateSection("Teleports")
-PlayersTab:CreateButton({Name = "Teleport to Lobby", Callback = tpLobby})
-PlayersTab:CreateButton({Name = "Teleport to Current Map", Callback = tpMap})
-PlayersTab:CreateButton({Name = "Emergency Teleport", Callback = tpEmergency})
-PlayersTab:CreateButton({Name = "Respawn", Callback = respawn})
-PlayersTab:CreateButton({Name = "Teleport to Gun (Snap Back)", Callback = TeleportToGunSnapBack})
-PlayersTab:CreateToggle({Name = "Enable Auto Teleport to Gun", CurrentValue = false, Callback = function(v) AutoGunTPEnabled = v end})
-
-ExploitTab:CreateLabel("Hotkeys: P = Toggle GUI | Q = Camera Aimbot | G = God Mode | Z = Desync | U = Hitbox Visuals")
+SheriffTab:CreateLabel("Hotkeys: P = Toggle GUI | Q = Camera Aimbot | G = God Mode | Z = Desync | U = Hitbox Visuals")
 
 Rayfield:LoadConfiguration()
 Rayfield:Notify({
     Title = "I Love Annie - MM2",
-    Content = "Script loaded successfully. Sheriff and Murderer features separated.",
+    Content = "i love my baby wyne so much enjoy baby",
     Duration = 5,
 })
