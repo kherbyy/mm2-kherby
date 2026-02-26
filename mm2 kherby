@@ -101,6 +101,11 @@ local predictionAmount = 0.168
 local aimPart = "Head"
 local originalGetTarget = nil
 
+-- Silent Aim 3D Visualizer
+local silentAimVisualizerEnabled = false
+local silentAimVisualizerBall = nil
+local silentAimTargetPart = nil
+
 local LastGunTPPosition = nil
 local AutoGunTPEnabled = false
 
@@ -146,19 +151,101 @@ local function getMurdererTargetPosition()
             local targetPart = character:FindFirstChild(aimPart) or character:FindFirstChild("Head") or character:FindFirstChild("HumanoidRootPart")
             if targetPart then
                 local targetPos = targetPart.Position
-               
+                silentAimTargetPart = targetPart
+                
                 if predictionEnabled then
                     local hrp = character:FindFirstChild("HumanoidRootPart")
                     if hrp and hrp.Velocity and hrp.Velocity.Magnitude > 3 then
                         targetPos = targetPos + (hrp.Velocity * predictionAmount)
                     end
                 end
-               
+                
                 return targetPos
             end
         end
     end
+    silentAimTargetPart = nil
     return nil
+end
+
+-- Create 3D Purple Ball for Silent Aim Visualizer
+local function createSilentAimVisualizer()
+    if silentAimVisualizerBall and silentAimVisualizerBall.Parent then
+        pcall(function() silentAimVisualizerBall:Destroy() end)
+    end
+    
+    -- Create a part to serve as the visualizer
+    silentAimVisualizerBall = Instance.new("Part")
+    silentAimVisualizerBall.Name = "SilentAimVisualizer"
+    silentAimVisualizerBall.Size = Vector3.new(2, 2, 2)
+    silentAimVisualizerBall.Shape = Enum.PartType.Ball
+    silentAimVisualizerBall.BrickColor = BrickColor.new("Bright violet")
+    silentAimVisualizerBall.Material = Enum.Material.Neon
+    silentAimVisualizerBall.Color = Color3.fromRGB(170, 0, 255) -- Purple
+    silentAimVisualizerBall.Transparency = 0.3
+    silentAimVisualizerBall.Anchored = true
+    silentAimVisualizerBall.CanCollide = false
+    silentAimVisualizerBall.CastShadow = false
+    
+    -- Add a glowing effect with a point light
+    local light = Instance.new("PointLight")
+    light.Parent = silentAimVisualizerBall
+    light.Color = Color3.fromRGB(170, 0, 255)
+    light.Range = 10
+    light.Brightness = 2
+    
+    -- Add a trail effect
+    local trail = Instance.new("Trail")
+    trail.Parent = silentAimVisualizerBall
+    trail.Color = ColorSequence.new(Color3.fromRGB(170, 0, 255))
+    trail.Lifetime = 0.3
+    trail.Enabled = true
+    
+    -- Add attachments for trail
+    local att0 = Instance.new("Attachment")
+    att0.Parent = silentAimVisualizerBall
+    local att1 = Instance.new("Attachment")
+    att1.Parent = silentAimVisualizerBall
+    att1.Position = Vector3.new(0, 1, 0)
+    
+    trail.Attachment0 = att0
+    trail.Attachment1 = att1
+    
+    -- Parent to workspace
+    silentAimVisualizerBall.Parent = workspace
+    
+    return silentAimVisualizerBall
+end
+
+-- Update Silent Aim Visualizer Position
+local function updateSilentAimVisualizer()
+    if not silentAimVisualizerEnabled or not silentAimEnabled then
+        if silentAimVisualizerBall then
+            silentAimVisualizerBall.Transparency = 1 -- Hide by making it fully transparent
+        end
+        return
+    end
+    
+    local targetPos = getMurdererTargetPosition()
+    if not targetPos then
+        if silentAimVisualizerBall then
+            silentAimVisualizerBall.Transparency = 1 -- Hide if no target
+        end
+        return
+    end
+    
+    -- Create visualizer if it doesn't exist
+    if not silentAimVisualizerBall or not silentAimVisualizerBall.Parent then
+        createSilentAimVisualizer()
+    end
+    
+    -- Update position
+    silentAimVisualizerBall.Position = targetPos
+    silentAimVisualizerBall.Transparency = 0.3 -- Show with some transparency
+    
+    -- Make it pulse slightly
+    local scale = 1 + math.sin(tick() * 5) * 0.1
+    silentAimVisualizerBall.Size = Vector3.new(2 * scale, 2 * scale, 2 * scale)
 end
 
 local function setupSilentAim()
@@ -191,6 +278,9 @@ local function setupSilentAim()
 end
 
 setupSilentAim()
+
+-- Connect visualizer to render step
+RunService.RenderStepped:Connect(updateSilentAimVisualizer)
 
 game:GetService("ReplicatedStorage").ChildAdded:Connect(function(child)
     if child.Name == "ClientServices" then
@@ -1695,6 +1785,24 @@ local GunTracerToggle = VisualsGunSection:AddToggle({
     Callback = function(v)
         GunTracerEnabled = v
         if not v and CurrentGunTracer then pcall(function() CurrentGunTracer:Destroy() end) CurrentGunTracer = nil end
+    end
+})
+
+-- Add Silent Aim Visualizer toggle to Visuals tab
+local VisualsSilentAimSection = VisualsTab:DrawSection({
+    Name = "Silent Aim Visuals",
+    Position = 'left'
+})
+
+local SilentAimVisualizerToggle = VisualsSilentAimSection:AddToggle({
+    Name = "Show 3D Silent Aim Target",
+    Flag = "SilentAim_Visualizer",
+    Default = false,
+    Callback = function(v)
+        silentAimVisualizerEnabled = v
+        if not v and silentAimVisualizerBall then
+            silentAimVisualizerBall.Transparency = 1
+        end
     end
 })
 
