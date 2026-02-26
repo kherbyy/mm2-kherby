@@ -47,8 +47,10 @@ Notifier.new({
     Icon = "rbxassetid://120245531583106"
 });
 
+-- Create Categories
 Window:DrawCategory({ Name = "Main Features" })
 
+-- Create Tabs
 local VisualsTab = Window:DrawTab({
     Name = "Visuals",
     Icon = "paintbrush",
@@ -79,6 +81,7 @@ local PlayersTab = Window:DrawTab({
     EnableScrolling = true
 });
 
+-- Settings Category
 Window:DrawCategory({ Name = "Settings" })
 
 local SettingsTab = Window:DrawTab({
@@ -87,6 +90,7 @@ local SettingsTab = Window:DrawTab({
     EnableScrolling = true
 });
 
+-- Game Variables
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
@@ -96,29 +100,45 @@ local mouse = LocalPlayer:GetMouse()
 local WeaponService = nil
 local silentAimEnabled = false
 local aimOnlyWhenHolding = false
-local predictionEnabled = true
+local predictionEnabled = false  -- Start with prediction OFF
 local predictionAmount = 0.168
 local aimPart = "Head"
 local originalGetTarget = nil
 
--- Advanced Prediction Variables
-local adaptivePredictionEnabled = true
+-- Advanced Adaptive Prediction Variables
+local adaptivePredictionEnabled = false
 local basePrediction = 0.168
 local minPrediction = 0.05
-local maxPrediction = 0.35
-local velocitySmoothing = 0.5
+local maxPrediction = 0.4
 local lastVelocities = {}
+local currentPing = 50
 
 -- Silent Aim 3D Visualizer
 local silentAimVisualizerEnabled = false
 local silentAimVisualizerBall = nil
-local silentAimTargetPart = nil
+
+-- Store toggle references
+local PredictionEnabledToggle = nil
+local AdaptivePredictionToggle = nil
+local PredictionAmountSlider = nil
 
 local LastGunTPPosition = nil
 local AutoGunTPEnabled = false
-
 local GunTracerEnabled = true
 local CurrentGunTracer = nil
+
+-- Ping detection
+local function getCurrentPing()
+    local stats = game:GetService("Stats")
+    local network = stats:FindFirstChild("Network")
+    if network then
+        local ping = network:FindFirstChild("Ping")
+        if ping then
+            return ping.Value
+        end
+    end
+    return 50
+end
 
 local function getWeaponService()
     local success, result = pcall(function()
@@ -152,7 +172,15 @@ local function isSheriff(plr)
     return false
 end
 
--- Advanced Adaptive Prediction Function
+-- Update ping
+task.spawn(function()
+    while true do
+        currentPing = getCurrentPing()
+        task.wait(1)
+    end
+end)
+
+-- Adaptive Prediction (Velocity + Ping)
 local function getAdaptivePrediction(plr)
     if not plr or not plr.Character then return basePrediction end
     
@@ -161,35 +189,33 @@ local function getAdaptivePrediction(plr)
     
     local velocity = hrp.Velocity.Magnitude
     
-    -- Store last few velocities for smoothing
     table.insert(lastVelocities, velocity)
     if #lastVelocities > 5 then
         table.remove(lastVelocities, 1)
     end
     
-    -- Calculate average velocity
     local avgVelocity = 0
     for _, v in ipairs(lastVelocities) do
         avgVelocity = avgVelocity + v
     end
     avgVelocity = avgVelocity / #lastVelocities
     
-    -- Dynamic prediction based on velocity
-    -- Fast players need more prediction, slow players need less
-    local dynamicPrediction = basePrediction
-    
-    if avgVelocity > 30 then -- Running
-        dynamicPrediction = math.min(basePrediction * (avgVelocity / 20), maxPrediction)
-    elseif avgVelocity < 10 then -- Walking or standing
-        dynamicPrediction = math.max(basePrediction * 0.5, minPrediction)
+    local velocityFactor = 1.0
+    if avgVelocity > 30 then
+        velocityFactor = math.min(avgVelocity / 20, 2.0)
+    elseif avgVelocity < 10 then
+        velocityFactor = 0.5
     end
     
-    -- Smooth the transition
-    local smoothedPrediction = (dynamicPrediction * velocitySmoothing) + (basePrediction * (1 - velocitySmoothing))
+    local pingFactor = 1.0 + (currentPing / 200)
+    local adaptiveAmount = basePrediction * velocityFactor * pingFactor
+    adaptiveAmount = math.max(minPrediction, math.min(maxPrediction, adaptiveAmount))
     
-    return smoothedPrediction
+    return adaptiveAmount
 end
 
+-- FIXED: This function now correctly handles prediction states
+-- Prediction is applied if EITHER predictionEnabled OR adaptivePredictionEnabled is true
 local function getMurdererTargetPosition()
     for _, plr in ipairs(Players:GetPlayers()) do
         if plr ~= LocalPlayer and isAlive(plr) and isMurderer(plr) then
@@ -197,108 +223,148 @@ local function getMurdererTargetPosition()
             local targetPart = character:FindFirstChild(aimPart) or character:FindFirstChild("Head") or character:FindFirstChild("HumanoidRootPart")
             if targetPart then
                 local targetPos = targetPart.Position
-                silentAimTargetPart = targetPart
                 
-                if predictionEnabled then
+                -- Apply prediction if EITHER mode is enabled
+                if predictionEnabled or adaptivePredictionEnabled then
                     local hrp = character:FindFirstChild("HumanoidRootPart")
                     if hrp and hrp.Velocity and hrp.Velocity.Magnitude > 3 then
                         if adaptivePredictionEnabled then
-                            -- Use adaptive prediction based on velocity
+                            -- Adaptive prediction takes priority when enabled
                             local adaptiveAmount = getAdaptivePrediction(plr)
                             targetPos = targetPos + (hrp.Velocity * adaptiveAmount)
-                        else
-                            -- Use fixed prediction
+                        elseif predictionEnabled then
+                            -- Manual prediction
                             targetPos = targetPos + (hrp.Velocity * predictionAmount)
                         end
                     end
                 end
+                -- If both are false, returns raw part position (no prediction)
                 
                 return targetPos
             end
         end
     end
-    silentAimTargetPart = nil
     return nil
 end
 
--- Create 3D Purple Ball for Silent Aim Visualizer
+-- Create 3D Visualizer Ball
 local function createSilentAimVisualizer()
     if silentAimVisualizerBall and silentAimVisualizerBall.Parent then
         pcall(function() silentAimVisualizerBall:Destroy() end)
     end
     
-    -- Create a part to serve as the visualizer
     silentAimVisualizerBall = Instance.new("Part")
     silentAimVisualizerBall.Name = "SilentAimVisualizer"
-    silentAimVisualizerBall.Size = Vector3.new(2, 2, 2)
+    silentAimVisualizerBall.Size = Vector3.new(2.5, 2.5, 2.5)
     silentAimVisualizerBall.Shape = Enum.PartType.Ball
-    silentAimVisualizerBall.BrickColor = BrickColor.new("Bright violet")
     silentAimVisualizerBall.Material = Enum.Material.Neon
-    silentAimVisualizerBall.Color = Color3.fromRGB(170, 0, 255) -- Purple
-    silentAimVisualizerBall.Transparency = 0.3
+    silentAimVisualizerBall.Color = Color3.fromRGB(255, 255, 255) -- Start white
+    silentAimVisualizerBall.Transparency = 0.2
     silentAimVisualizerBall.Anchored = true
     silentAimVisualizerBall.CanCollide = false
-    silentAimVisualizerBall.CastShadow = false
     
-    -- Add a glowing effect with a point light
     local light = Instance.new("PointLight")
     light.Parent = silentAimVisualizerBall
-    light.Color = Color3.fromRGB(170, 0, 255)
-    light.Range = 10
-    light.Brightness = 2
+    light.Color = Color3.fromRGB(255, 255, 255)
+    light.Range = 15
+    light.Brightness = 3
     
-    -- Add a trail effect
+    local billboard = Instance.new("BillboardGui")
+    billboard.Parent = silentAimVisualizerBall
+    billboard.Size = UDim2.new(0, 4, 0, 4)
+    billboard.StudsOffset = Vector3.new(0, 3, 0)
+    billboard.AlwaysOnTop = true
+    
+    local frame = Instance.new("Frame")
+    frame.Parent = billboard
+    frame.Size = UDim2.new(1, 0, 1, 0)
+    frame.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+    frame.BackgroundTransparency = 0.3
+    frame.BorderSizePixel = 0
+    
+    local uicorner = Instance.new("UICorner")
+    uicorner.Parent = frame
+    uicorner.CornerRadius = UDim.new(1, 0)
+    
     local trail = Instance.new("Trail")
     trail.Parent = silentAimVisualizerBall
-    trail.Color = ColorSequence.new(Color3.fromRGB(170, 0, 255))
-    trail.Lifetime = 0.3
+    trail.Color = ColorSequence.new(Color3.fromRGB(255, 255, 255))
+    trail.Lifetime = 0.4
     trail.Enabled = true
     
-    -- Add attachments for trail
     local att0 = Instance.new("Attachment")
     att0.Parent = silentAimVisualizerBall
     local att1 = Instance.new("Attachment")
     att1.Parent = silentAimVisualizerBall
-    att1.Position = Vector3.new(0, 1, 0)
+    att1.Position = Vector3.new(0, 1.5, 0)
     
     trail.Attachment0 = att0
     trail.Attachment1 = att1
     
-    -- Parent to workspace
     silentAimVisualizerBall.Parent = workspace
-    
     return silentAimVisualizerBall
 end
 
--- Update Silent Aim Visualizer Position
+-- Update Visualizer Position - Shows EXACT aim position with color coding
 local function updateSilentAimVisualizer()
     if not silentAimVisualizerEnabled or not silentAimEnabled then
         if silentAimVisualizerBall then
-            silentAimVisualizerBall.Transparency = 1 -- Hide by making it fully transparent
+            silentAimVisualizerBall.Transparency = 1
         end
         return
     end
     
-    local targetPos = getMurdererTargetPosition()
+    local targetPos = getMurdererTargetPosition() -- Same function silent aim uses
     if not targetPos then
         if silentAimVisualizerBall then
-            silentAimVisualizerBall.Transparency = 1 -- Hide if no target
+            silentAimVisualizerBall.Transparency = 1
         end
         return
     end
     
-    -- Create visualizer if it doesn't exist
     if not silentAimVisualizerBall or not silentAimVisualizerBall.Parent then
         createSilentAimVisualizer()
     end
     
-    -- Update position
     silentAimVisualizerBall.Position = targetPos
-    silentAimVisualizerBall.Transparency = 0.3 -- Show with some transparency
+    silentAimVisualizerBall.Transparency = 0.2
     
-    -- Make it pulse slightly
-    local scale = 1 + math.sin(tick() * 5) * 0.1
-    silentAimVisualizerBall.Size = Vector3.new(2 * scale, 2 * scale, 2 * scale)
+    -- Color coding based on prediction mode
+    if adaptivePredictionEnabled then
+        -- Mode: ADAPTIVE - Cyan ball (velocity + ping)
+        silentAimVisualizerBall.Color = Color3.fromRGB(0, 255, 255)
+        silentAimVisualizerBall.BrickColor = BrickColor.new("Cyan")
+        if silentAimVisualizerBall:FindFirstChild("PointLight") then
+            silentAimVisualizerBall.PointLight.Color = Color3.fromRGB(0, 255, 255)
+        end
+        if silentAimVisualizerBall:FindFirstChild("BillboardGui") then
+            silentAimVisualizerBall.BillboardGui.Frame.BackgroundColor3 = Color3.fromRGB(0, 255, 255)
+        end
+    elseif predictionEnabled then
+        -- Mode: MANUAL - Purple ball (fixed amount)
+        silentAimVisualizerBall.Color = Color3.fromRGB(170, 0, 255)
+        silentAimVisualizerBall.BrickColor = BrickColor.new("Bright violet")
+        if silentAimVisualizerBall:FindFirstChild("PointLight") then
+            silentAimVisualizerBall.PointLight.Color = Color3.fromRGB(170, 0, 255)
+        end
+        if silentAimVisualizerBall:FindFirstChild("BillboardGui") then
+            silentAimVisualizerBall.BillboardGui.Frame.BackgroundColor3 = Color3.fromRGB(170, 0, 255)
+        end
+    else
+        -- Mode: NO PREDICTION - White ball (raw position)
+        silentAimVisualizerBall.Color = Color3.fromRGB(255, 255, 255)
+        silentAimVisualizerBall.BrickColor = BrickColor.new("White")
+        if silentAimVisualizerBall:FindFirstChild("PointLight") then
+            silentAimVisualizerBall.PointLight.Color = Color3.fromRGB(255, 255, 255)
+        end
+        if silentAimVisualizerBall:FindFirstChild("BillboardGui") then
+            silentAimVisualizerBall.BillboardGui.Frame.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
+        end
+    end
+    
+    -- Pulse effect
+    local scale = 1 + math.sin(tick() * 5) * 0.15
+    silentAimVisualizerBall.Size = Vector3.new(2.5 * scale, 2.5 * scale, 2.5 * scale)
 end
 
 local function setupSilentAim()
@@ -314,7 +380,7 @@ local function setupSilentAim()
                     end
                 end
                
-                local targetPos = getMurdererTargetPosition()
+                local targetPos = getMurdererTargetPosition() -- Same function visualizer uses
                 if targetPos then
                     return CFrame.new(targetPos)
                 end
@@ -332,7 +398,7 @@ end
 
 setupSilentAim()
 
--- Connect visualizer to render step
+-- Connect visualizer
 RunService.RenderStepped:Connect(updateSilentAimVisualizer)
 
 game:GetService("ReplicatedStorage").ChildAdded:Connect(function(child)
@@ -508,7 +574,6 @@ local function UpdateAllESPColors()
     end
 end
 
--- FIXED SetupPlayerESP function with proper error handling
 local function SetupPlayerESP(plr)
     if plr == LocalPlayer then return end
     
@@ -523,7 +588,6 @@ local function SetupPlayerESP(plr)
         end
     end
     
-    -- Safely connect to backpack events
     local function connectBackpackEvents()
         local success, backpack = pcall(function()
             return plr:FindFirstChild("Backpack")
@@ -539,17 +603,14 @@ local function SetupPlayerESP(plr)
         end
     end
     
-    -- Connect backpack events when player loads
     connectBackpackEvents()
     
-    -- Also connect when player's Backpack is added
     plr.ChildAdded:Connect(function(child)
         if child.Name == "Backpack" then
             connectBackpackEvents()
         end
     end)
     
-    -- Handle character
     if plr.Character then
         plr.Character.ChildAdded:Connect(function(c)
             if c.Name == "Knife" or c.Name == "Gun" or c.Name == "Revolver" then OnToolChange() end
@@ -633,7 +694,6 @@ local lastAttack = tick()
 local SelectedPlayerName = nil
 local OriginalCameraSubject = nil
 local AimbotToggle, GodModeToggle, VisualizeHitboxToggle, DesyncToggle, KillAuraToggle
-local SetDesyncToggle = nil
 local antiFlingCleanup = nil
 
 local function hasGun()
@@ -704,7 +764,6 @@ local function checkAutoAvoidMurderer()
             desync.AutoAvoidActive = false
             if desync.Enabled then
                 desync.Enabled = false
-                if SetDesyncToggle then SetDesyncToggle(false) end
                 Notifier.new({
                     Title = "Auto Avoid",
                     Content = "Murderer left the area - Desync OFF",
@@ -724,7 +783,6 @@ local function checkAutoAvoidMurderer()
             desync.AutoAvoidActive = true
             desync.Enabled = true
             desync.Method = "Sky"
-            if SetDesyncToggle then SetDesyncToggle(true) end
             Notifier.new({
                 Title = "Auto Avoid",
                 Content = string.format("Murderer %.1f studs away - Desync ON", nearestMurdererDist),
@@ -735,7 +793,6 @@ local function checkAutoAvoidMurderer()
         if desync.Enabled and desync.AutoAvoidActive then
             desync.Enabled = false
             desync.AutoAvoidActive = false
-            if SetDesyncToggle then SetDesyncToggle(false) end
             Notifier.new({
                 Title = "Auto Avoid",
                 Content = "Murderer out of range - Desync OFF",
@@ -1678,7 +1735,7 @@ Workspace.DescendantRemoving:Connect(function(d)
     end
 end)
 
--- FIXED KEYBINDS - Only work when UI toggle is enabled
+-- KEYBINDS
 UserInputService.InputBegan:Connect(function(input, gp)
     if gp then return end
     
@@ -1722,7 +1779,6 @@ UserInputService.InputBegan:Connect(function(input, gp)
             if not newDesync then
                 getgenv().Desync.AutoAvoidActive = false
             end
-            SetDesyncToggle(newDesync)
             Notifier.new({Title = "Desync", Content = newDesync and "ON" or "OFF", Duration = 2})
         end
     elseif input.KeyCode == Enum.KeyCode.K then
@@ -1748,21 +1804,9 @@ UserInputService.InputEnded:Connect(function(input)
     end
 end)
 
-local OriginalCFrameHook = nil
-OriginalCFrameHook = hookmetamethod(game, "__index", newcclosure(function(Self, Key)
-    if getgenv().Desync.Enabled then
-        if not checkcaller() then
-            if Key == "CFrame" and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") and LocalPlayer.Character:FindFirstChild("Humanoid") and LocalPlayer.Character.Humanoid.Health > 0 then
-                if Self == LocalPlayer.Character.HumanoidRootPart then
-                    return DesyncData.OriginalCFrame or CFrame.new()
-                elseif Self == LocalPlayer.Character.Head then
-                    return DesyncData.OriginalCFrame or CFrame.new()
-                end
-            end
-        end
-    end
-    return OriginalCFrameHook(Self, Key)
-end))
+-- =====================================================================
+-- UI SECTIONS - VISUALS TAB
+-- =====================================================================
 
 local VisualsPlayerSection = VisualsTab:DrawSection({
     Name = "Player ESP",
@@ -1841,7 +1885,7 @@ local GunTracerToggle = VisualsGunSection:AddToggle({
     end
 })
 
--- Add Silent Aim Visualizer toggle to Visuals tab
+-- Silent Aim Visuals Section
 local VisualsSilentAimSection = VisualsTab:DrawSection({
     Name = "Silent Aim Visuals",
     Position = 'left'
@@ -1859,15 +1903,35 @@ local SilentAimVisualizerToggle = VisualsSilentAimSection:AddToggle({
     end
 })
 
--- Add Adaptive Prediction toggle
-local AdaptivePredictionToggle = VisualsSilentAimSection:AddToggle({
-    Name = "Adaptive Prediction (Auto-adjust)",
+-- Adaptive Prediction Toggle - CORRECTED BEHAVIOR
+AdaptivePredictionToggle = VisualsSilentAimSection:AddToggle({
+    Name = "Adaptive Prediction (Velocity + Ping)",
     Flag = "Adaptive_Prediction",
-    Default = true,
+    Default = false,
     Callback = function(v)
         adaptivePredictionEnabled = v
+        if v then
+            -- When adaptive is ON, it overrides manual prediction
+            -- Visualizer should move and show CYAN
+            Notifier.new({
+                Title = "Adaptive Prediction",
+                Content = "ON - Velocity + Ping adjusted (Cyan ball)",
+                Duration = 2
+            })
+        else
+            -- When adaptive is OFF, prediction state determines behavior
+            Notifier.new({
+                Title = "Adaptive Prediction",
+                Content = "OFF - Using manual prediction settings",
+                Duration = 2
+            })
+        end
     end
 })
+
+-- =====================================================================
+-- UI SECTIONS - SHERIFF TAB
+-- =====================================================================
 
 local SheriffCameraSection = SheriffTab:DrawSection({
     Name = "Camera Aimbot",
@@ -2001,16 +2065,36 @@ local AimPartDropdown = SheriffSilentSection:AddDropdown({
     end
 })
 
-local PredictionEnabledToggle = SheriffSilentSection:AddToggle({
+-- Prediction Toggle - CORRECTED BEHAVIOR
+PredictionEnabledToggle = SheriffSilentSection:AddToggle({
     Name = "Enable Prediction",
     Flag = "PredictionEnabled",
-    Default = true,
+    Default = false,  -- Start OFF
     Callback = function(value)
-        predictionEnabled = value
+        if adaptivePredictionEnabled then
+            -- If adaptive is on, we can still toggle manual prediction
+            -- but adaptive will take priority in the backend
+            predictionEnabled = value
+            Notifier.new({
+                Title = "Manual Prediction",
+                Content = value and "ON (but Adaptive has priority)" or "OFF",
+                Duration = 2
+            })
+        else
+            predictionEnabled = value
+            -- When prediction is OFF, visualizer shows raw position (white ball)
+            -- When prediction is ON, visualizer shows manual prediction (purple ball)
+            Notifier.new({
+                Title = "Manual Prediction",
+                Content = value and "ON - Purple ball" or "OFF - White ball (raw position)",
+                Duration = 2
+            })
+        end
     end,
 })
 
-local PredictionAmountSlider = SheriffSilentSection:AddSlider({
+-- Prediction Slider
+PredictionAmountSlider = SheriffSilentSection:AddSlider({
     Name = "Prediction Strength",
     Min = 0,
     Max = 0.5,
@@ -2018,8 +2102,14 @@ local PredictionAmountSlider = SheriffSilentSection:AddSlider({
     Round = 3,
     Flag = "PredictionAmount",
     Callback = function(value)
-        predictionAmount = value
-        basePrediction = value
+        if adaptivePredictionEnabled then
+            -- Slider still works but adaptive will override in backend
+            predictionAmount = value
+            basePrediction = value
+        else
+            predictionAmount = value
+            basePrediction = value
+        end
     end
 })
 
@@ -2037,6 +2127,10 @@ local TriggerbotToggle = SheriffTriggerSection:AddToggle({
         if v then startTriggerbot() else if triggerConn then triggerConn:Disconnect() end end
     end,
 })
+
+-- =====================================================================
+-- UI SECTIONS - MURDERER TAB
+-- =====================================================================
 
 local MurdererRageSection = MurdererTab:DrawSection({
     Name = "Rage Features",
@@ -2126,6 +2220,10 @@ local HitboxSizeSlider = MurdererHitboxSection:AddSlider({
     end
 })
 
+-- =====================================================================
+-- UI SECTIONS - EXPLOIT TAB
+-- =====================================================================
+
 local ExploitSurvivalSection = ExploitTab:DrawSection({
     Name = "Survival Features",
     Position = 'left'
@@ -2170,10 +2268,6 @@ DesyncToggle = ExploitDesyncSection:AddToggle({
     end,
 })
 
-SetDesyncToggle = function(value)
-    DesyncToggle:Set(value)
-end
-
 local DesyncKeybind = ExploitDesyncSection:AddKeybind({
     Name = "Desync Keybind",
     Default = "Z",
@@ -2183,7 +2277,6 @@ local DesyncKeybind = ExploitDesyncSection:AddKeybind({
             local newValue = not getgenv().Desync.Enabled
             getgenv().Desync.Enabled = newValue
             if not newValue then getgenv().Desync.AutoAvoidActive = false end
-            SetDesyncToggle(newValue)
             Notifier.new({Title = "Desync", Content = newValue and "ON" or "OFF", Duration = 2})
         end
     end,
@@ -2311,6 +2404,10 @@ local AutoAvoidParagraph = ExploitAutoAvoidSection:AddParagraph({
     Content = "Sky desync activates when murderer is nearby."
 })
 
+-- =====================================================================
+-- UI SECTIONS - PLAYERS TAB
+-- =====================================================================
+
 local PlayersTeleportsSection = PlayersTab:DrawSection({
     Name = "Teleports",
     Position = 'left'
@@ -2379,6 +2476,7 @@ local PlayerDropdown = PlayersSelectorSection:AddDropdown({
     end
 })
 
+-- Auto-refresh player list
 task.spawn(function()
     while task.wait(2) do
         if PlayerDropdown then
@@ -2455,6 +2553,10 @@ local SpectateToggle = PlayersActionsSection:AddToggle({
     end,
 })
 
+-- =====================================================================
+-- UI SECTIONS - SETTINGS TAB
+-- =====================================================================
+
 local UISettingsSection = SettingsTab:DrawSection({
     Name = "UI Settings",
     Position = 'left'
@@ -2527,6 +2629,10 @@ ThemeSection:AddDropdown({
     end,
 })
 
+-- =====================================================================
+-- CONFIG TAB
+-- =====================================================================
+
 local ConfigUI = Window:DrawConfig({
     Name = "Config",
     Icon = "folder",
@@ -2535,10 +2641,11 @@ local ConfigUI = Window:DrawConfig({
 
 ConfigUI:Init()
 
+-- Load configuration if exists
 ConfigManager:LoadConfig("AnnieConfig")
 
 Notifier.new({
     Title = "I Love Annie - MM2",
-    Content = "I LOVE MY BABYl",
+    Content = "Script loaded! Press P to toggle UI | K for Kill All",
     Duration = 5
 })
