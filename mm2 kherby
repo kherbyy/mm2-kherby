@@ -1,14 +1,23 @@
+--[[
+    I Love Annie - MM2
+    Converted to Compkiller UI
+]]
+
 local Compkiller = loadstring(game:HttpGet("https://raw.githubusercontent.com/4lpaca-pin/CompKiller/refs/heads/main/src/source.luau"))();
 
+-- Create Notification --
 local Notifier = Compkiller.newNotify();
 
+-- Create Config Manager --
 local ConfigManager = Compkiller:ConfigManager({
     Directory = "KherbyMM2",
     Config = "AnnieConfig"
 });
 
+-- Loading UI (BIG CK ICON) -- 
 Compkiller:Loader("rbxassetid://120245531583106", 2.5):yield();
 
+-- Creating Window --
 local Window = Compkiller.new({
     Name = "I Love Annie - MM2",
     Keybind = "P",
@@ -17,6 +26,7 @@ local Window = Compkiller.new({
     TextSize = 15,
 });
 
+-- Watermark --
 local Watermark = Window:Watermark();
 Watermark:AddText({
     Icon = "user",
@@ -40,6 +50,7 @@ Watermark:AddText({
     Text = Compkiller.Version,
 });
 
+-- Notification --
 Notifier.new({
     Title = "I Love Annie - MM2",
     Content = "I LOVE MY BABY",
@@ -47,10 +58,10 @@ Notifier.new({
     Icon = "rbxassetid://120245531583106"
 });
 
--- Create Categories
+-- Creating Tab Categories
 Window:DrawCategory({ Name = "Main Features" })
 
--- Create Tabs
+-- Creating Tabs --
 local VisualsTab = Window:DrawTab({
     Name = "Visuals",
     Icon = "paintbrush",
@@ -81,16 +92,16 @@ local PlayersTab = Window:DrawTab({
     EnableScrolling = true
 });
 
--- Settings Category
+-- Settings Tab Category
 Window:DrawCategory({ Name = "Settings" })
 
+-- Settings Tab
 local SettingsTab = Window:DrawTab({
     Name = "Settings",
     Icon = "settings",
     EnableScrolling = true
 });
 
--- Game Variables
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
@@ -100,45 +111,26 @@ local mouse = LocalPlayer:GetMouse()
 local WeaponService = nil
 local silentAimEnabled = false
 local aimOnlyWhenHolding = false
-local predictionEnabled = false  -- Start with prediction OFF
+local predictionEnabled = true
 local predictionAmount = 0.168
 local aimPart = "Head"
 local originalGetTarget = nil
 
--- Advanced Adaptive Prediction Variables
-local adaptivePredictionEnabled = false
-local basePrediction = 0.168
-local minPrediction = 0.05
-local maxPrediction = 0.4
-local lastVelocities = {}
-local currentPing = 50
-
--- Silent Aim 3D Visualizer
-local silentAimVisualizerEnabled = false
-local silentAimVisualizerBall = nil
-
--- Store toggle references
-local PredictionEnabledToggle = nil
-local AdaptivePredictionToggle = nil
-local PredictionAmountSlider = nil
-
+-- GUN TELEPORTER VARIABLES
 local LastGunTPPosition = nil
 local AutoGunTPEnabled = false
+
+-- GUN DROP LINE TRACER
 local GunTracerEnabled = true
 local CurrentGunTracer = nil
 
--- Ping detection
-local function getCurrentPing()
-    local stats = game:GetService("Stats")
-    local network = stats:FindFirstChild("Network")
-    if network then
-        local ping = network:FindFirstChild("Ping")
-        if ping then
-            return ping.Value
-        end
-    end
-    return 50
-end
+-- FEATURE ENABLED STATES (for keybind validation)
+local featureEnabled = {
+    Aimbot = false,
+    GodMode = false,
+    KillAura = false,
+    Desync = false
+}
 
 local function getWeaponService()
     local success, result = pcall(function()
@@ -152,7 +144,7 @@ end
 
 local function isMurderer(plr)
     if not plr then return false end
-    return (plr.Backpack and (plr.Backpack:FindFirstChild("Knife") or (plr.Character and plr.Character:FindFirstChild("Knife"))))
+    return (plr.Backpack:FindFirstChild("Knife") or (plr.Character and plr.Character:FindFirstChild("Knife")))
 end
 
 local function isAlive(plr)
@@ -165,57 +157,18 @@ local function isSheriff(plr)
     if not plr then return false end
     local gunNames = {"Gun", "Revolver"}
     for _, name in ipairs(gunNames) do
-        if plr.Backpack and (plr.Backpack:FindFirstChild(name) or (plr.Character and plr.Character:FindFirstChild(name))) then
+        if plr.Backpack:FindFirstChild(name) or (plr.Character and plr.Character:FindFirstChild(name)) then
             return true
         end
     end
     return false
 end
 
--- Update ping
-task.spawn(function()
-    while true do
-        currentPing = getCurrentPing()
-        task.wait(1)
-    end
-end)
-
--- Adaptive Prediction (Velocity + Ping)
-local function getAdaptivePrediction(plr)
-    if not plr or not plr.Character then return basePrediction end
-    
-    local hrp = plr.Character:FindFirstChild("HumanoidRootPart")
-    if not hrp then return basePrediction end
-    
-    local velocity = hrp.Velocity.Magnitude
-    
-    table.insert(lastVelocities, velocity)
-    if #lastVelocities > 5 then
-        table.remove(lastVelocities, 1)
-    end
-    
-    local avgVelocity = 0
-    for _, v in ipairs(lastVelocities) do
-        avgVelocity = avgVelocity + v
-    end
-    avgVelocity = avgVelocity / #lastVelocities
-    
-    local velocityFactor = 1.0
-    if avgVelocity > 30 then
-        velocityFactor = math.min(avgVelocity / 20, 2.0)
-    elseif avgVelocity < 10 then
-        velocityFactor = 0.5
-    end
-    
-    local pingFactor = 1.0 + (currentPing / 200)
-    local adaptiveAmount = basePrediction * velocityFactor * pingFactor
-    adaptiveAmount = math.max(minPrediction, math.min(maxPrediction, adaptiveAmount))
-    
-    return adaptiveAmount
+local function isInnocent(plr)
+    return plr ~= LocalPlayer and isAlive(plr) and not isMurderer(plr) and not isSheriff(plr)
 end
 
--- FIXED: This function now correctly handles prediction states
--- Prediction is applied if EITHER predictionEnabled OR adaptivePredictionEnabled is true
+-- SILENT AIM WITH PREDICTION
 local function getMurdererTargetPosition()
     for _, plr in ipairs(Players:GetPlayers()) do
         if plr ~= LocalPlayer and isAlive(plr) and isMurderer(plr) then
@@ -223,148 +176,19 @@ local function getMurdererTargetPosition()
             local targetPart = character:FindFirstChild(aimPart) or character:FindFirstChild("Head") or character:FindFirstChild("HumanoidRootPart")
             if targetPart then
                 local targetPos = targetPart.Position
-                
-                -- Apply prediction if EITHER mode is enabled
-                if predictionEnabled or adaptivePredictionEnabled then
+               
+                if predictionEnabled then
                     local hrp = character:FindFirstChild("HumanoidRootPart")
                     if hrp and hrp.Velocity and hrp.Velocity.Magnitude > 3 then
-                        if adaptivePredictionEnabled then
-                            -- Adaptive prediction takes priority when enabled
-                            local adaptiveAmount = getAdaptivePrediction(plr)
-                            targetPos = targetPos + (hrp.Velocity * adaptiveAmount)
-                        elseif predictionEnabled then
-                            -- Manual prediction
-                            targetPos = targetPos + (hrp.Velocity * predictionAmount)
-                        end
+                        targetPos = targetPos + (hrp.Velocity * predictionAmount)
                     end
                 end
-                -- If both are false, returns raw part position (no prediction)
-                
+               
                 return targetPos
             end
         end
     end
     return nil
-end
-
--- Create 3D Visualizer Ball
-local function createSilentAimVisualizer()
-    if silentAimVisualizerBall and silentAimVisualizerBall.Parent then
-        pcall(function() silentAimVisualizerBall:Destroy() end)
-    end
-    
-    silentAimVisualizerBall = Instance.new("Part")
-    silentAimVisualizerBall.Name = "SilentAimVisualizer"
-    silentAimVisualizerBall.Size = Vector3.new(2.5, 2.5, 2.5)
-    silentAimVisualizerBall.Shape = Enum.PartType.Ball
-    silentAimVisualizerBall.Material = Enum.Material.Neon
-    silentAimVisualizerBall.Color = Color3.fromRGB(255, 255, 255) -- Start white
-    silentAimVisualizerBall.Transparency = 0.2
-    silentAimVisualizerBall.Anchored = true
-    silentAimVisualizerBall.CanCollide = false
-    
-    local light = Instance.new("PointLight")
-    light.Parent = silentAimVisualizerBall
-    light.Color = Color3.fromRGB(255, 255, 255)
-    light.Range = 15
-    light.Brightness = 3
-    
-    local billboard = Instance.new("BillboardGui")
-    billboard.Parent = silentAimVisualizerBall
-    billboard.Size = UDim2.new(0, 4, 0, 4)
-    billboard.StudsOffset = Vector3.new(0, 3, 0)
-    billboard.AlwaysOnTop = true
-    
-    local frame = Instance.new("Frame")
-    frame.Parent = billboard
-    frame.Size = UDim2.new(1, 0, 1, 0)
-    frame.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-    frame.BackgroundTransparency = 0.3
-    frame.BorderSizePixel = 0
-    
-    local uicorner = Instance.new("UICorner")
-    uicorner.Parent = frame
-    uicorner.CornerRadius = UDim.new(1, 0)
-    
-    local trail = Instance.new("Trail")
-    trail.Parent = silentAimVisualizerBall
-    trail.Color = ColorSequence.new(Color3.fromRGB(255, 255, 255))
-    trail.Lifetime = 0.4
-    trail.Enabled = true
-    
-    local att0 = Instance.new("Attachment")
-    att0.Parent = silentAimVisualizerBall
-    local att1 = Instance.new("Attachment")
-    att1.Parent = silentAimVisualizerBall
-    att1.Position = Vector3.new(0, 1.5, 0)
-    
-    trail.Attachment0 = att0
-    trail.Attachment1 = att1
-    
-    silentAimVisualizerBall.Parent = workspace
-    return silentAimVisualizerBall
-end
-
--- Update Visualizer Position - Shows EXACT aim position with color coding
-local function updateSilentAimVisualizer()
-    if not silentAimVisualizerEnabled or not silentAimEnabled then
-        if silentAimVisualizerBall then
-            silentAimVisualizerBall.Transparency = 1
-        end
-        return
-    end
-    
-    local targetPos = getMurdererTargetPosition() -- Same function silent aim uses
-    if not targetPos then
-        if silentAimVisualizerBall then
-            silentAimVisualizerBall.Transparency = 1
-        end
-        return
-    end
-    
-    if not silentAimVisualizerBall or not silentAimVisualizerBall.Parent then
-        createSilentAimVisualizer()
-    end
-    
-    silentAimVisualizerBall.Position = targetPos
-    silentAimVisualizerBall.Transparency = 0.2
-    
-    -- Color coding based on prediction mode
-    if adaptivePredictionEnabled then
-        -- Mode: ADAPTIVE - Cyan ball (velocity + ping)
-        silentAimVisualizerBall.Color = Color3.fromRGB(0, 255, 255)
-        silentAimVisualizerBall.BrickColor = BrickColor.new("Cyan")
-        if silentAimVisualizerBall:FindFirstChild("PointLight") then
-            silentAimVisualizerBall.PointLight.Color = Color3.fromRGB(0, 255, 255)
-        end
-        if silentAimVisualizerBall:FindFirstChild("BillboardGui") then
-            silentAimVisualizerBall.BillboardGui.Frame.BackgroundColor3 = Color3.fromRGB(0, 255, 255)
-        end
-    elseif predictionEnabled then
-        -- Mode: MANUAL - Purple ball (fixed amount)
-        silentAimVisualizerBall.Color = Color3.fromRGB(170, 0, 255)
-        silentAimVisualizerBall.BrickColor = BrickColor.new("Bright violet")
-        if silentAimVisualizerBall:FindFirstChild("PointLight") then
-            silentAimVisualizerBall.PointLight.Color = Color3.fromRGB(170, 0, 255)
-        end
-        if silentAimVisualizerBall:FindFirstChild("BillboardGui") then
-            silentAimVisualizerBall.BillboardGui.Frame.BackgroundColor3 = Color3.fromRGB(170, 0, 255)
-        end
-    else
-        -- Mode: NO PREDICTION - White ball (raw position)
-        silentAimVisualizerBall.Color = Color3.fromRGB(255, 255, 255)
-        silentAimVisualizerBall.BrickColor = BrickColor.new("White")
-        if silentAimVisualizerBall:FindFirstChild("PointLight") then
-            silentAimVisualizerBall.PointLight.Color = Color3.fromRGB(255, 255, 255)
-        end
-        if silentAimVisualizerBall:FindFirstChild("BillboardGui") then
-            silentAimVisualizerBall.BillboardGui.Frame.BackgroundColor3 = Color3.fromRGB(255, 255, 255)
-        end
-    end
-    
-    -- Pulse effect
-    local scale = 1 + math.sin(tick() * 5) * 0.15
-    silentAimVisualizerBall.Size = Vector3.new(2.5 * scale, 2.5 * scale, 2.5 * scale)
 end
 
 local function setupSilentAim()
@@ -380,7 +204,7 @@ local function setupSilentAim()
                     end
                 end
                
-                local targetPos = getMurdererTargetPosition() -- Same function visualizer uses
+                local targetPos = getMurdererTargetPosition()
                 if targetPos then
                     return CFrame.new(targetPos)
                 end
@@ -397,9 +221,6 @@ local function setupSilentAim()
 end
 
 setupSilentAim()
-
--- Connect visualizer
-RunService.RenderStepped:Connect(updateSilentAimVisualizer)
 
 game:GetService("ReplicatedStorage").ChildAdded:Connect(function(child)
     if child.Name == "ClientServices" then
@@ -554,9 +375,7 @@ local function ForceRefreshESP()
     if not ESPEnabled then return end
     for _, plr in ipairs(Players:GetPlayers()) do
         if plr ~= LocalPlayer and plr.Character and isAlive(plr) then
-            pcall(function()
-                CreateESP(plr.Character, plr)
-            end)
+            CreateESP(plr.Character, plr)
         end
     end
 end
@@ -576,41 +395,20 @@ end
 
 local function SetupPlayerESP(plr)
     if plr == LocalPlayer then return end
-    
     local function OnToolChange()
         task.wait(0.08)
         if ESPEnabled and plr.Character and isAlive(plr) then
-            pcall(function()
-                CreateESP(plr.Character, plr)
-            end)
+            CreateESP(plr.Character, plr)
         else
             UpdateAllESPColors()
         end
     end
-    
-    local function connectBackpackEvents()
-        local success, backpack = pcall(function()
-            return plr:FindFirstChild("Backpack")
-        end)
-        
-        if success and backpack then
-            backpack.ChildAdded:Connect(function(c)
-                if c.Name == "Knife" or c.Name == "Gun" or c.Name == "Revolver" then OnToolChange() end
-            end)
-            backpack.ChildRemoved:Connect(function(c)
-                if c.Name == "Knife" or c.Name == "Gun" or c.Name == "Revolver" then OnToolChange() end
-            end)
-        end
-    end
-    
-    connectBackpackEvents()
-    
-    plr.ChildAdded:Connect(function(child)
-        if child.Name == "Backpack" then
-            connectBackpackEvents()
-        end
+    plr.Backpack.ChildAdded:Connect(function(c)
+        if c.Name == "Knife" or c.Name == "Gun" or c.Name == "Revolver" then OnToolChange() end
     end)
-    
+    plr.Backpack.ChildRemoved:Connect(function(c)
+        if c.Name == "Knife" or c.Name == "Gun" or c.Name == "Revolver" then OnToolChange() end
+    end)
     if plr.Character then
         plr.Character.ChildAdded:Connect(function(c)
             if c.Name == "Knife" or c.Name == "Gun" or c.Name == "Revolver" then OnToolChange() end
@@ -619,55 +417,34 @@ local function SetupPlayerESP(plr)
             if c.Name == "Knife" or c.Name == "Gun" or c.Name == "Revolver" then OnToolChange() end
         end)
     end
-    
     plr.CharacterAdded:Connect(function(char)
         task.wait(0.85)
         if ESPEnabled and char.Parent then
-            pcall(function()
-                CreateESP(char, plr)
-            end)
+            CreateESP(char, plr)
         end
-        
-        char.ChildAdded:Connect(function(c)
-            if c.Name == "Knife" or c.Name == "Gun" or c.Name == "Revolver" then OnToolChange() end
-        end)
-        char.ChildRemoved:Connect(function(c)
-            if c.Name == "Knife" or c.Name == "Gun" or c.Name == "Revolver" then OnToolChange() end
-        end)
     end)
-    
     plr.CharacterRemoving:Connect(function(char)
         CleanupESP(char)
     end)
-    
     if plr.Character then
         task.spawn(function()
             task.wait(1.2)
-            if ESPEnabled then 
-                pcall(function()
-                    CreateESP(plr.Character, plr)
-                end)
-            end
+            if ESPEnabled then CreateESP(plr.Character, plr) end
         end)
     end
 end
 
 for _, plr in ipairs(Players:GetPlayers()) do
-    pcall(function()
-        SetupPlayerESP(plr)
-    end)
+    SetupPlayerESP(plr)
 end
 
-Players.PlayerAdded:Connect(function(plr)
-    pcall(function()
-        SetupPlayerESP(plr)
-    end)
-end)
+Players.PlayerAdded:Connect(SetupPlayerESP)
 
 local GunESPEnabled = true
 local DroppedGunHighlightEnabled = true
 local TriggerbotEnabled = false
 local GodModeEnabled = false
+local GodModeHotkeyUnlocked = false
 local AntiFlingEnabled = false
 local HitboxEnabled = false
 local VisualizeHitbox = false
@@ -693,11 +470,14 @@ local KillAuraRange = 25
 local lastAttack = tick()
 local SelectedPlayerName = nil
 local OriginalCameraSubject = nil
-local AimbotToggle, GodModeToggle, VisualizeHitboxToggle, DesyncToggle, KillAuraToggle
+local AimbotToggle, GodModeToggle, VisualizeHitboxToggle, DesyncToggle
+local SetDesyncToggle = nil
 local antiFlingCleanup = nil
+local isFlinging = false
+local currentFlingTarget = nil
 
 local function hasGun()
-    return LocalPlayer.Backpack and (LocalPlayer.Backpack:FindFirstChild("Gun") or (LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Gun")))
+    return LocalPlayer.Backpack:FindFirstChild("Gun") or (LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Gun"))
 end
 
 local function getNearestMurdererDistance()
@@ -722,6 +502,8 @@ local function getNearestMurdererDistance()
 end
 
 local function LocalTriggerDesyncOnce()
+    if not featureEnabled.Desync then return end -- Only work if enabled in UI
+    
     local LocalCharacter = LocalPlayer.Character
     local LocalRootPart = LocalCharacter and LocalCharacter:FindFirstChild("HumanoidRootPart")
     if not LocalRootPart then return end
@@ -757,6 +539,7 @@ local function checkHealthForDesync()
     desync.LastHealth = healthPercent
 end
 
+-- AUTO AVOID NOTIFICATIONS
 local function checkAutoAvoidMurderer()
     local desync = getgenv().Desync
     if not desync.AutoAvoidMurderer then
@@ -764,6 +547,7 @@ local function checkAutoAvoidMurderer()
             desync.AutoAvoidActive = false
             if desync.Enabled then
                 desync.Enabled = false
+                if SetDesyncToggle then SetDesyncToggle(false) end
                 Notifier.new({
                     Title = "Auto Avoid",
                     Content = "Murderer left the area - Desync OFF",
@@ -783,6 +567,7 @@ local function checkAutoAvoidMurderer()
             desync.AutoAvoidActive = true
             desync.Enabled = true
             desync.Method = "Sky"
+            if SetDesyncToggle then SetDesyncToggle(true) end
             Notifier.new({
                 Title = "Auto Avoid",
                 Content = string.format("Murderer %.1f studs away - Desync ON", nearestMurdererDist),
@@ -793,6 +578,7 @@ local function checkAutoAvoidMurderer()
         if desync.Enabled and desync.AutoAvoidActive then
             desync.Enabled = false
             desync.AutoAvoidActive = false
+            if SetDesyncToggle then SetDesyncToggle(false) end
             Notifier.new({
                 Title = "Auto Avoid",
                 Content = "Murderer out of range - Desync OFF",
@@ -802,337 +588,17 @@ local function checkAutoAvoidMurderer()
     end
 end
 
-local function SkidFling(TargetPlayer)
-    local Character = LocalPlayer.Character
-    local Humanoid = Character and Character:FindFirstChildOfClass("Humanoid")
-    local RootPart = Humanoid and Humanoid.RootPart
-    local TCharacter = TargetPlayer.Character
-    local THumanoid, TRootPart, THead, Accessory, Handle
-
-    if not Character or not Humanoid or not RootPart then
-        return FlingNotify("Fling Error", "Your character not loaded", 3)
-    end
-
-    if TCharacter then
-        THumanoid = TCharacter:FindFirstChildOfClass("Humanoid")
-        if THumanoid and THumanoid.RootPart then 
-            TRootPart = THumanoid.RootPart 
-        end
-        THead = TCharacter:FindFirstChild("Head")
-        Accessory = TCharacter:FindFirstChildOfClass("Accessory")
-        if Accessory and Accessory:FindFirstChild("Handle") then 
-            Handle = Accessory.Handle 
-        end
-    end
-
-    if not (TCharacter and THumanoid) then
-        return FlingNotify("Fling Error", "Target not loaded", 3)
-    end
-
-    if THumanoid.Sit then
-        return FlingNotify("Fling Error", "Target is sitting", 3)
-    end
-
-    getgenv().OldPos = RootPart.CFrame
-
-    if THead then
-        workspace.CurrentCamera.CameraSubject = THead
-    elseif Handle then
-        workspace.CurrentCamera.CameraSubject = Handle
-    elseif THumanoid and TRootPart then
-        workspace.CurrentCamera.CameraSubject = THumanoid
-    end
-
-    local oldAntiFling = AntiFlingEnabled
-    AntiFlingEnabled = false
-
-    workspace.FallenPartsDestroyHeight = 0/0
-
-    local BV = Instance.new("BodyVelocity")
-    BV.Name = "EpixVel"
-    BV.Parent = RootPart
-    BV.Velocity = Vector3.new(9e8, 9e8, 9e8)
-    BV.MaxForce = Vector3.new(1/0, 1/0, 1/0)
-
-    Humanoid:SetStateEnabled(Enum.HumanoidStateType.Seated, false)
-
-    local targetPart = THead or TRootPart or Handle
-    if not targetPart then
-        targetPart = TRootPart
-    end
-
-    if not targetPart then
-        return FlingNotify("Fling Error", "Target has no flingable parts", 3)
-    end
-
-    local function FPos(BasePart, Pos, Ang)
-        RootPart.CFrame = CFrame.new(BasePart.Position) * Pos * Ang
-        Character:SetPrimaryPartCFrame(CFrame.new(BasePart.Position) * Pos * Ang)
-        RootPart.Velocity = Vector3.new(9e7, 9e7 * 10, 9e7)
-        RootPart.RotVelocity = Vector3.new(9e8, 9e8, 9e8)
-    end
-
-    local function SFBasePart(BasePart)
-        local TimeToWait = 2
-        local Time = tick()
-        local Angle = 0
-
-        FlingNotify("Fling Started", "Flinging " .. TargetPlayer.Name, 2)
-
-        repeat
-            if RootPart and THumanoid then
-                if BasePart.Velocity.Magnitude < 50 then
-                    Angle = Angle + 100
-
-                    FPos(BasePart, CFrame.new(0, 1.5, 0) + THumanoid.MoveDirection * BasePart.Velocity.Magnitude / 1.25, CFrame.Angles(math.rad(Angle),0 ,0))
-                    task.wait()
-
-                    FPos(BasePart, CFrame.new(0, -1.5, 0) + THumanoid.MoveDirection * BasePart.Velocity.Magnitude / 1.25, CFrame.Angles(math.rad(Angle), 0, 0))
-                    task.wait()
-
-                    FPos(BasePart, CFrame.new(2.25, 1.5, -2.25) + THumanoid.MoveDirection * BasePart.Velocity.Magnitude / 1.25, CFrame.Angles(math.rad(Angle), 0, 0))
-                    task.wait()
-
-                    FPos(BasePart, CFrame.new(-2.25, -1.5, 2.25) + THumanoid.MoveDirection * BasePart.Velocity.Magnitude / 1.25, CFrame.Angles(math.rad(Angle), 0, 0))
-                    task.wait()
-
-                    FPos(BasePart, CFrame.new(0, 1.5, 0) + THumanoid.MoveDirection,CFrame.Angles(math.rad(Angle), 0, 0))
-                    task.wait()
-
-                    FPos(BasePart, CFrame.new(0, -1.5, 0) + THumanoid.MoveDirection,CFrame.Angles(math.rad(Angle), 0, 0))
-                    task.wait()
-                else
-                    FPos(BasePart, CFrame.new(0, 1.5, THumanoid.WalkSpeed), CFrame.Angles(math.rad(90), 0, 0))
-                    task.wait()
-
-                    FPos(BasePart, CFrame.new(0, -1.5, -THumanoid.WalkSpeed), CFrame.Angles(0, 0, 0))
-                    task.wait()
-
-                    FPos(BasePart, CFrame.new(0, 1.5, THumanoid.WalkSpeed), CFrame.Angles(math.rad(90), 0, 0))
-                    task.wait()
-                    
-                    FPos(BasePart, CFrame.new(0, 1.5, TRootPart.Velocity.Magnitude / 1.25), CFrame.Angles(math.rad(90), 0, 0))
-                    task.wait()
-
-                    FPos(BasePart, CFrame.new(0, -1.5, -TRootPart.Velocity.Magnitude / 1.25), CFrame.Angles(0, 0, 0))
-                    task.wait()
-
-                    FPos(BasePart, CFrame.new(0, 1.5, TRootPart.Velocity.Magnitude / 1.25), CFrame.Angles(math.rad(90), 0, 0))
-                    task.wait()
-
-                    FPos(BasePart, CFrame.new(0, -1.5, 0), CFrame.Angles(math.rad(90), 0, 0))
-                    task.wait()
-
-                    FPos(BasePart, CFrame.new(0, -1.5, 0), CFrame.Angles(0, 0, 0))
-                    task.wait()
-
-                    FPos(BasePart, CFrame.new(0, -1.5 ,0), CFrame.Angles(math.rad(-90), 0, 0))
-                    task.wait()
-
-                    FPos(BasePart, CFrame.new(0, -1.5, 0), CFrame.Angles(0, 0, 0))
-                    task.wait()
-                end
-            else
-                break
-            end
-        until BasePart.Velocity.Magnitude > 500 or not BasePart.Parent or TargetPlayer.Parent ~= Players or THumanoid.Sit or Humanoid.Health <= 0 or tick() > Time + TimeToWait
-    end
-
-    if TRootPart and THead then
-        if (TRootPart.Position - THead.Position).Magnitude > 5 then
-            SFBasePart(THead)
-        else
-            SFBasePart(TRootPart)
-        end
-    elseif TRootPart then
-        SFBasePart(TRootPart)
-    elseif THead then
-        SFBasePart(THead)
-    elseif Handle then
-        SFBasePart(Handle)
-    end
-
-    pcall(function() BV:Destroy() end)
-
-    Humanoid:SetStateEnabled(Enum.HumanoidStateType.Seated, true)
-    workspace.CurrentCamera.CameraSubject = Humanoid
-
-    AntiFlingEnabled = oldAntiFling
-
-    workspace.FallenPartsDestroyHeight = getgenv().FPDH
-
-    local returnStart = tick()
-    repeat
-        pcall(function()
-            RootPart.CFrame = getgenv().OldPos * CFrame.new(0, .5, 0)
-            Character:SetPrimaryPartCFrame(getgenv().OldPos * CFrame.new(0, .5, 0))
-            Humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
-            
-            for _, x in ipairs(Character:GetDescendants()) do
-                if x:IsA("BasePart") then
-                    x.Velocity = Vector3.new()
-                    x.RotVelocity = Vector3.new()
-                end
-            end
-        end)
-        task.wait(0.1)
-    until (RootPart.Position - getgenv().OldPos.Position).Magnitude < 25 or tick() - returnStart > 2
-
-    FlingNotify("Fling Success", "Successfully flung " .. TargetPlayer.Name, 3)
-end
-
-local function FlingSelected()
-    if not SelectedPlayerName then
-        Notifier.new({Title = "Fling Error", Content = "No player selected", Duration = 2})
-        return
-    end
-    local target = Players:FindFirstChild(SelectedPlayerName)
-    if target and target ~= LocalPlayer and target.Character then
-        Notifier.new({Title = "Fling", Content = "Flinging " .. target.Name, Duration = 2})
-        task.spawn(SkidFling, target)
-    else
-        Notifier.new({Title = "Fling Error", Content = "Target invalid", Duration = 2})
-    end
-end
-
-local function FlingSheriff()
-    Notifier.new({Title = "Fling", Content = "Searching for Sheriff...", Duration = 2})
-    local sheriffFound = false
-    for _, plr in ipairs(Players:GetPlayers()) do
-        if plr ~= LocalPlayer and isAlive(plr) and isSheriff(plr) then
-            Notifier.new({Title = "Fling", Content = "Found Sheriff: " .. plr.Name, Duration = 2})
-            task.spawn(SkidFling, plr)
-            sheriffFound = true
-            break
-        end
-    end
-    if not sheriffFound then
-        Notifier.new({Title = "Fling", Content = "No Sheriff found", Duration = 2})
-    end
-end
-
-local function FlingMurderer()
-    Notifier.new({Title = "Fling", Content = "Searching for Murderer...", Duration = 2})
-    local murdererFound = false
-    for _, plr in ipairs(Players:GetPlayers()) do
-        if plr ~= LocalPlayer and isAlive(plr) and isMurderer(plr) then
-            Notifier.new({Title = "Fling", Content = "Found Murderer: " .. plr.Name, Duration = 2})
-            task.spawn(SkidFling, plr)
-            murdererFound = true
-            break
-        end
-    end
-    if not murdererFound then
-        Notifier.new({Title = "Fling", Content = "No Murderer found", Duration = 2})
-    end
-end
-
-local function FlingAll()
-    Notifier.new({Title = "Fling All", Content = "Starting to fling all players...", Duration = 3})
-    local count = 0
-    
-    if SelectedPlayerName then
-        local target = Players:FindFirstChild(SelectedPlayerName)
-        if target and target ~= LocalPlayer and isAlive(target) then
-            Notifier.new({Title = "Fling All", Content = "Flinging selected player: " .. target.Name, Duration = 2})
-            SkidFling(target)
-            count = count + 1
-            task.wait(0.5)
-        end
-    end
-    
-    for _, plr in ipairs(Players:GetPlayers()) do
-        if plr ~= LocalPlayer and isAlive(plr) then
-            if SelectedPlayerName and plr.Name == SelectedPlayerName then
-                continue
-            end
-            
-            Notifier.new({Title = "Fling All", Content = "Flinging " .. plr.Name .. " (" .. (count + 1) .. "/" .. (#Players:GetPlayers() - 1) .. ")", Duration = 2})
-            SkidFling(plr)
-            count = count + 1
-            task.wait(0.3)
-        end
-    end
-    
-    Notifier.new({Title = "Fling All", Content = "Flung " .. count .. " players total", Duration = 4})
-end
-
-local function destroyAllPlayerHighlights()
-    for _, plr in ipairs(Players:GetPlayers()) do
-        if plr ~= LocalPlayer and plr.Character then
-            pcall(function()
-                CleanupESP(plr.Character)
-            end)
-        end
-    end
-end
-
-local function getBestTarget()
-    if StickyEnabled and LockedTarget and isAlive(LockedTarget) then return LockedTarget end
-    local camera = Workspace.CurrentCamera
-    local mousePos = UserInputService:GetMouseLocation()
-    local bestTarget, bestScore = nil, math.huge
-    for _, plr in ipairs(Players:GetPlayers()) do
-        if plr ~= LocalPlayer and isAlive(plr) and plr.Character and plr.Character:FindFirstChild("Head") then
-            if AimbotOnlyMurderer and not isMurderer(plr) then continue end
-            local head = plr.Character.Head
-            local screenPos, onScreen = camera:WorldToViewportPoint(head.Position)
-            if onScreen then
-                local dist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
-                if dist < AimbotFOV then
-                    local score = dist
-                    if isMurderer(plr) then score = score * 0.15 end
-                    if score < bestScore then
-                        bestScore = score
-                        bestTarget = plr
-                    end
-                end
-            end
-        end
-    end
-    if StickyEnabled and bestTarget then LockedTarget = bestTarget end
-    return bestTarget
-end
-
-local function getPredictedPosition(plr)
-    if not plr or not plr.Character then return nil end
-    local part = plr.Character:FindFirstChild(TargetPart) or plr.Character:FindFirstChild("Head")
-    if not part then return nil end
-    if not PredictionEnabled then return part.Position end
-    local hrp = plr.Character:FindFirstChild("HumanoidRootPart")
-    local vel = hrp and hrp.Velocity or Vector3.new()
-    return part.Position + (vel * AimbotPrediction)
-end
-
-local function updateAimbot()
-    if not AimbotEnabled or not HoldingMouse2 then return end
-    local targetPlr = getBestTarget()
-    if not targetPlr then return end
-    local predictedPos = getPredictedPosition(targetPlr)
-    if not predictedPos then return end
-    local camera = Workspace.CurrentCamera
-    local currentCFrame = camera.CFrame
-    local targetCFrame = CFrame.new(currentCFrame.Position, predictedPos)
-    if not PredictionEnabled then
-        camera.CFrame = targetCFrame
-    else
-        local smooth = isMurderer(targetPlr) and 0.78 or AimbotSmoothness
-        camera.CFrame = currentCFrame:Lerp(targetCFrame, smooth)
-    end
-    if targetPlr ~= LastLockedTarget then
-        LastLockedTarget = targetPlr
-        Notifier.new({Title = "Aimbot Locked", Content = "Target: " .. targetPlr.Name .. (isMurderer(targetPlr) and " (Murderer)" or ""), Duration = 1.8})
-    end
-end
-
-RunService:BindToRenderStep("AnnieAimbotCamlock", Enum.RenderPriority.Camera.Value + 1, updateAimbot)
-
+-- IMPROVED ANTI-FLING - MUCH STRONGER
 local function setupAntiFling()
     local character = LocalPlayer.Character
     if not character then return end
     
+    -- Anti-Fling variables
     local antiFlingConnections = {}
     local lastPosition = Vector3.new()
+    local positionHistory = {}
+    local velocitySpikes = 0
+    local lastCheck = tick()
     
     local function StrongAntiFling()
         if not AntiFlingEnabled or not character then return end
@@ -1142,16 +608,42 @@ local function setupAntiFling()
         
         if not humanoid or not rootPart or humanoid.Health <= 0 then return end
         
-        if rootPart.Velocity.Magnitude > 150 then
-            if lastPosition.Magnitude > 0 then
-                rootPart.CFrame = CFrame.new(lastPosition)
+        -- Track position history for velocity analysis
+        table.insert(positionHistory, {
+            pos = rootPart.Position,
+            time = tick()
+        })
+        if #positionHistory > 10 then
+            table.remove(positionHistory, 1)
+        end
+        
+        -- Calculate velocity from history
+        local calculatedVelocity = Vector3.new()
+        if #positionHistory >= 2 then
+            local newest = positionHistory[#positionHistory]
+            local oldest = positionHistory[1]
+            local dt = newest.time - oldest.time
+            if dt > 0 then
+                calculatedVelocity = (newest.pos - oldest.pos) / dt
             end
+        end
+        
+        -- Check for suspicious velocity (fling attempt)
+        local currentVel = rootPart.Velocity
+        local velMagnitude = currentVel.Magnitude
+        local calcMagnitude = calculatedVelocity.Magnitude
+        
+        -- More aggressive detection
+        if velMagnitude > 80 or calcMagnitude > 80 or (velMagnitude > 40 and calcMagnitude > 40) then
+            velocitySpikes = velocitySpikes + 1
             
+            -- Immediate counter-measures
             rootPart.Velocity = Vector3.new(0, 0, 0)
             rootPart.RotVelocity = Vector3.new(0, 0, 0)
             rootPart.AssemblyLinearVelocity = Vector3.new(0, 0, 0)
             rootPart.AssemblyAngularVelocity = Vector3.new(0, 0, 0)
             
+            -- Reset all other parts
             for _, part in ipairs(character:GetDescendants()) do
                 if part:IsA("BasePart") and part ~= rootPart then
                     part.Velocity = Vector3.new(0, 0, 0)
@@ -1159,38 +651,75 @@ local function setupAntiFling()
                 end
             end
             
-            rootPart.Anchored = true
-            task.wait(0.1)
-            rootPart.Anchored = false
+            -- If multiple spikes detected, anchor temporarily
+            if velocitySpikes > 3 then
+                rootPart.Anchored = true
+                task.wait(0.15)
+                rootPart.Anchored = false
+                velocitySpikes = 0
+            end
+            
+            -- Restore position if we have a safe one
+            if lastPosition.Magnitude > 0 then
+                rootPart.CFrame = CFrame.new(lastPosition)
+            end
         else
-            if rootPart.Velocity.Magnitude < 20 then
+            -- Save last safe position when velocity is normal
+            if velMagnitude < 15 then
                 lastPosition = rootPart.Position
             end
+            -- Decay spike counter over time
+            if tick() - lastCheck > 2 then
+                velocitySpikes = math.max(0, velocitySpikes - 1)
+                lastCheck = tick()
+            end
         end
-    end
-    
-    local heartbeatConn = RunService.Heartbeat:Connect(StrongAntiFling)
-    table.insert(antiFlingConnections, heartbeatConn)
-    
-    local function onPartAdded(part)
-        if not AntiFlingEnabled then return end
-        if part:IsA("BodyVelocity") or part:IsA("BodyPosition") or part:IsA("BodyAngularVelocity") or part:IsA("BodyGyro") or part:IsA("BodyThrust") then
-            task.wait()
-            if part and part.Parent then
+        
+        -- Aggressively remove body movers
+        for _, part in ipairs(character:GetDescendants()) do
+            if part:IsA("BodyVelocity") or part:IsA("BodyPosition") or 
+               part:IsA("BodyAngularVelocity") or part:IsA("BodyGyro") or 
+               part:IsA("BodyThrust") or part:IsA("BodyForce") then
                 pcall(function() part:Destroy() end)
             end
         end
     end
     
+    -- Run anti-fling checks more frequently
+    local heartbeatConn = RunService.Heartbeat:Connect(StrongAntiFling)
+    table.insert(antiFlingConnections, heartbeatConn)
+    
+    -- Also run on stepped for extra protection
+    local steppedConn = RunService.Stepped:Connect(StrongAntiFling)
+    table.insert(antiFlingConnections, steppedConn)
+    
+    -- Protect against BodyMovers
+    local function onPartAdded(part)
+        if not AntiFlingEnabled then return end
+        if part:IsA("BodyVelocity") or part:IsA("BodyPosition") or 
+           part:IsA("BodyAngularVelocity") or part:IsA("BodyGyro") or 
+           part:IsA("BodyThrust") or part:IsA("BodyForce") then
+            task.wait()
+            if part and part.Parent then
+                part:Destroy()
+            end
+        end
+    end
+    
+    -- Monitor for new parts
     local descendantConn = character.DescendantAdded:Connect(onPartAdded)
     table.insert(antiFlingConnections, descendantConn)
     
+    -- Check existing parts
     for _, part in ipairs(character:GetDescendants()) do
-        if part:IsA("BodyVelocity") or part:IsA("BodyPosition") or part:IsA("BodyAngularVelocity") or part:IsA("BodyGyro") or part:IsA("BodyThrust") then
+        if part:IsA("BodyVelocity") or part:IsA("BodyPosition") or 
+           part:IsA("BodyAngularVelocity") or part:IsA("BodyGyro") or 
+           part:IsA("BodyThrust") or part:IsA("BodyForce") then
             pcall(function() part:Destroy() end)
         end
     end
     
+    -- Cleanup function
     return function()
         for _, conn in ipairs(antiFlingConnections) do
             conn:Disconnect()
@@ -1199,12 +728,14 @@ local function setupAntiFling()
     end
 end
 
+-- Update the character added connection
 LocalPlayer.CharacterAdded:Connect(function()
     if GodModeEnabled then task.wait(1) enableGodMode() end
     task.wait(1)
     if antiFlingCleanup then antiFlingCleanup() end
     antiFlingCleanup = setupAntiFling()
     
+    -- Store cleanup function for when character dies
     LocalPlayer.CharacterRemoving:Connect(function()
         if antiFlingCleanup then 
             antiFlingCleanup()
@@ -1213,6 +744,7 @@ LocalPlayer.CharacterAdded:Connect(function()
     end)
 end)
 
+-- Also run on current character
 if LocalPlayer.Character then
     task.wait(1)
     antiFlingCleanup = setupAntiFling()
@@ -1228,7 +760,7 @@ local function enableGodMode()
             newHumanoid.Parent = character
             newHumanoid.Name = "Humanoid"
             task.wait(0.1)
-            pcall(function() character["1"]:Destroy() end)
+            character["1"]:Destroy()
             Workspace.CurrentCamera.CameraSubject = character
             if character:FindFirstChild("Animate") then
                 character.Animate.Disabled = true
@@ -1243,7 +775,7 @@ end
 local function getCurrentMap()
     if CurrentMapCache and CurrentMapCache.Parent then return CurrentMapCache end
     for _, v in ipairs(Workspace:GetDescendants()) do
-        if v.Name == "Spawns" and v.Parent and v.Parent.Name ~= "Lobby" then
+        if v.Name == "Spawns" and v.Parent.Name ~= "Lobby" then
             CurrentMapCache = v.Parent
             return CurrentMapCache
         end
@@ -1252,14 +784,15 @@ local function getCurrentMap()
     return nil
 end
 
+-- LINE TRACER FOR DROPPED GUN
 local function updateGunTracer()
     if not GunTracerEnabled then
-        if CurrentGunTracer then pcall(function() CurrentGunTracer:Destroy() end) CurrentGunTracer = nil end
+        if CurrentGunTracer then CurrentGunTracer:Destroy() CurrentGunTracer = nil end
         return
     end
     local character = LocalPlayer.Character
     if not character or not character:FindFirstChild("HumanoidRootPart") then
-        if CurrentGunTracer then pcall(function() CurrentGunTracer:Destroy() end) CurrentGunTracer = nil end
+        if CurrentGunTracer then CurrentGunTracer:Destroy() CurrentGunTracer = nil end
         return
     end
     local gunDrop = nil
@@ -1272,7 +805,7 @@ local function updateGunTracer()
                 CurrentGunTracer.Attachment1.Parent = gunDrop
             end
         else
-            if CurrentGunTracer then pcall(function() CurrentGunTracer:Destroy() end) end
+            if CurrentGunTracer then CurrentGunTracer:Destroy() end
             local att0 = Instance.new("Attachment")
             att0.Name = "TracerAtt0"
             att0.Parent = character.HumanoidRootPart
@@ -1294,7 +827,7 @@ local function updateGunTracer()
             CurrentGunTracer = beam
         end
     else
-        if CurrentGunTracer then pcall(function() CurrentGunTracer:Destroy() end) CurrentGunTracer = nil end
+        if CurrentGunTracer then CurrentGunTracer:Destroy() CurrentGunTracer = nil end
     end
 end
 
@@ -1302,8 +835,8 @@ local function highlightDroppedGun()
     if not DroppedGunHighlightEnabled then
         for _, obj in ipairs(Workspace:GetDescendants()) do
             if obj.Name == "GunDrop" then
-                if obj:FindFirstChild("GunDropHighlight") then pcall(function() obj.GunDropHighlight:Destroy() end) end
-                if obj:FindFirstChild("GunDropLabel") then pcall(function() obj.GunDropLabel:Destroy() end) end
+                if obj:FindFirstChild("GunDropHighlight") then obj.GunDropHighlight:Destroy() end
+                if obj:FindFirstChild("GunDropLabel") then obj.GunDropLabel:Destroy() end
             end
         end
         return
@@ -1313,7 +846,7 @@ local function highlightDroppedGun()
     local gunDrop = currentMap:FindFirstChild("GunDrop")
     if not gunDrop then gunDrop = Workspace:FindFirstChild("GunDrop") end
     if gunDrop and not gunDrop:FindFirstChild("GunDropHighlight") then
-        if gunDrop:FindFirstChild("GunDropLabel") then pcall(function() gunDrop.GunDropLabel:Destroy() end) end
+        if gunDrop:FindFirstChild("GunDropLabel") then gunDrop.GunDropLabel:Destroy() end
         local hl = Instance.new("Highlight")
         hl.Name = "GunDropHighlight"
         hl.Adornee = gunDrop
@@ -1368,16 +901,14 @@ end
 local function refreshToolGunESP()
     if not GunESPEnabled then
         for _, obj in ipairs(Workspace:GetChildren()) do
-            if obj:FindFirstChild("GunDroppedESP") then pcall(function() obj.GunDroppedESP:Destroy() end) end
-            if obj:FindFirstChild("GunLabel") then pcall(function() obj.GunLabel:Destroy() end) end
+            if obj:FindFirstChild("GunDroppedESP") then obj.GunDroppedESP:Destroy() end
+            if obj:FindFirstChild("GunLabel") then obj.GunLabel:Destroy() end
         end
         return
     end
     for _, obj in ipairs(Workspace:GetChildren()) do
         if obj:IsA("Tool") and obj.Name == "Gun" then
-            pcall(function()
-                createToolGunESP(obj)
-            end)
+            createToolGunESP(obj)
         end
     end
 end
@@ -1433,7 +964,7 @@ local function ResetHitboxes()
         local HRP = Player.Character:FindFirstChild("HumanoidRootPart")
         if HRP then HRP.Size = Vector3.new(2, 2, 1) end
         if BoxHandles[Player.Character] then
-            pcall(function() BoxHandles[Player.Character]:Destroy() end)
+            BoxHandles[Player.Character]:Destroy()
             BoxHandles[Player.Character] = nil
         end
     end
@@ -1457,15 +988,15 @@ local function startTriggerbot()
 end
 
 RunService.Heartbeat:Connect(function()
-    if not KillAuraEnabled then return end
+    if not KillAuraEnabled or not featureEnabled.KillAura then return end -- Only work if enabled
     local character = LocalPlayer.Character
     if not character or not character:FindFirstChild("HumanoidRootPart") then return end
-    local Knife = LocalPlayer.Backpack and (LocalPlayer.Backpack:FindFirstChild("Knife") or character:FindFirstChild("Knife"))
+    local Knife = LocalPlayer.Backpack:FindFirstChild("Knife") or character:FindFirstChild("Knife")
     if not Knife or not Knife:FindFirstChild("Handle") then return end
     if (tick() - lastAttack) < 0.1 then return end
     for _, plr in ipairs(Players:GetPlayers()) do
         if plr ~= LocalPlayer and isAlive(plr) then
-            local root = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
+            local root = plr.Character:FindFirstChild("HumanoidRootPart")
             if root then
                 local dist = (root.Position - character.HumanoidRootPart.Position).Magnitude
                 if dist <= KillAuraRange and dist > 1 then
@@ -1483,9 +1014,14 @@ RunService.Heartbeat:Connect(function()
 end)
 
 local function PerformKillAll()
+    if not featureEnabled.KillAura then 
+        Notifier.new({Title = "Kill All", Content = "Enable Kill Aura first", Duration = 3})
+        return 
+    end
+    
     local character = LocalPlayer.Character
     if not character then return end
-    local Knife = LocalPlayer.Backpack and (LocalPlayer.Backpack:FindFirstChild("Knife") or character:FindFirstChild("Knife"))
+    local Knife = LocalPlayer.Backpack:FindFirstChild("Knife") or character:FindFirstChild("Knife")
     if not Knife then
         Notifier.new({Title = "Kill All", Content = "No Knife (must be Murderer)", Duration = 3})
         return
@@ -1501,8 +1037,8 @@ local function PerformKillAll()
     local count = 0
     for _, plr in ipairs(Players:GetPlayers()) do
         if plr ~= LocalPlayer and isAlive(plr) then
-            local root = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
-            if root and Knife and Knife:FindFirstChild("Handle") then
+            local root = plr.Character:FindFirstChild("HumanoidRootPart")
+            if root and Knife:FindFirstChild("Handle") then
                 firetouchinterest(root, Knife.Handle, 1)
                 firetouchinterest(root, Knife.Handle, 0)
                 count = count + 1
@@ -1514,6 +1050,16 @@ local function PerformKillAll()
 end
 
 local function TeleportToGunSnapBack()
+    -- Don't teleport if player is murderer
+    if isMurderer(LocalPlayer) then
+        Notifier.new({
+            Title = "Auto TP Skipped",
+            Content = "You're the murderer - keeping your knife!",
+            Duration = 2
+        })
+        return
+    end
+    
     local gunDrop = Workspace:FindFirstChild("GunDrop")
     local currentMap = getCurrentMap()
     if currentMap and not gunDrop then gunDrop = currentMap:FindFirstChild("GunDrop") end
@@ -1673,11 +1219,418 @@ local function TeleportToSelected()
     end
 end
 
+-- IMPROVED FLING FUNCTIONS - Complete one target before moving to next
+local function SkidFling(TargetPlayer, callback)
+    if isFlinging and currentFlingTarget then return end -- Already flinging
+    
+    isFlinging = true
+    currentFlingTarget = TargetPlayer
+    
+    local Character = LocalPlayer.Character
+    local Humanoid = Character and Character:FindFirstChildOfClass("Humanoid")
+    local RootPart = Humanoid and Humanoid.RootPart
+    local TCharacter = TargetPlayer.Character
+    local THumanoid, TRootPart, THead, Accessory, Handle
+
+    if not Character or not Humanoid or not RootPart then
+        FlingNotify("Fling Error", "Your character not loaded", 3)
+        isFlinging = false
+        currentFlingTarget = nil
+        if callback then callback() end
+        return
+    end
+
+    if TCharacter then
+        THumanoid = TCharacter:FindFirstChildOfClass("Humanoid")
+        if THumanoid and THumanoid.RootPart then 
+            TRootPart = THumanoid.RootPart 
+        end
+        THead = TCharacter:FindFirstChild("Head")
+        Accessory = TCharacter:FindFirstChildOfClass("Accessory")
+        if Accessory and Accessory:FindFirstChild("Handle") then 
+            Handle = Accessory.Handle 
+        end
+    end
+
+    if not (TCharacter and THumanoid) then
+        FlingNotify("Fling Error", "Target not loaded", 3)
+        isFlinging = false
+        currentFlingTarget = nil
+        if callback then callback() end
+        return
+    end
+
+    if THumanoid.Sit then
+        FlingNotify("Fling Error", "Target is sitting", 3)
+        isFlinging = false
+        currentFlingTarget = nil
+        if callback then callback() end
+        return
+    end
+
+    -- Save original position
+    getgenv().OldPos = RootPart.CFrame
+
+    -- Set camera subject to target
+    if THead then
+        workspace.CurrentCamera.CameraSubject = THead
+    elseif Handle then
+        workspace.CurrentCamera.CameraSubject = Handle
+    elseif THumanoid and TRootPart then
+        workspace.CurrentCamera.CameraSubject = THumanoid
+    end
+
+    -- Disable anti-fling temporarily
+    local oldAntiFling = AntiFlingEnabled
+    AntiFlingEnabled = false
+
+    -- Set fallen parts destroy height to NaN
+    workspace.FallenPartsDestroyHeight = 0/0
+
+    -- Create powerful body mover
+    local BV = Instance.new("BodyVelocity")
+    BV.Name = "EpixVel"
+    BV.Parent = RootPart
+    BV.Velocity = Vector3.new(9e8, 9e8, 9e8)
+    BV.MaxForce = Vector3.new(1/0, 1/0, 1/0)
+
+    -- Disable seating
+    Humanoid:SetStateEnabled(Enum.HumanoidStateType.Seated, false)
+
+    -- Get target part to fling against
+    local targetPart = THead or TRootPart or Handle
+    if not targetPart then
+        targetPart = TRootPart
+    end
+
+    if not targetPart then
+        FlingNotify("Fling Error", "Target has no flingable parts", 3)
+        isFlinging = false
+        currentFlingTarget = nil
+        if callback then callback() end
+        return
+    end
+
+    -- Fling function
+    local function FPos(BasePart, Pos, Ang)
+        RootPart.CFrame = CFrame.new(BasePart.Position) * Pos * Ang
+        Character:SetPrimaryPartCFrame(CFrame.new(BasePart.Position) * Pos * Ang)
+        RootPart.Velocity = Vector3.new(9e7, 9e7 * 10, 9e7)
+        RootPart.RotVelocity = Vector3.new(9e8, 9e8, 9e8)
+    end
+
+    -- Main fling loop
+    local function SFBasePart(BasePart)
+        local TimeToWait = 3 -- Increased duration
+        local Time = tick()
+        local Angle = 0
+
+        FlingNotify("Fling Started", "Flinging " .. TargetPlayer.Name, 2)
+
+        repeat
+            if RootPart and THumanoid then
+                if BasePart.Velocity.Magnitude < 50 then
+                    Angle = Angle + 100
+
+                    FPos(BasePart, CFrame.new(0, 1.5, 0) + THumanoid.MoveDirection * BasePart.Velocity.Magnitude / 1.25, CFrame.Angles(math.rad(Angle),0 ,0))
+                    task.wait()
+
+                    FPos(BasePart, CFrame.new(0, -1.5, 0) + THumanoid.MoveDirection * BasePart.Velocity.Magnitude / 1.25, CFrame.Angles(math.rad(Angle), 0, 0))
+                    task.wait()
+
+                    FPos(BasePart, CFrame.new(2.25, 1.5, -2.25) + THumanoid.MoveDirection * BasePart.Velocity.Magnitude / 1.25, CFrame.Angles(math.rad(Angle), 0, 0))
+                    task.wait()
+
+                    FPos(BasePart, CFrame.new(-2.25, -1.5, 2.25) + THumanoid.MoveDirection * BasePart.Velocity.Magnitude / 1.25, CFrame.Angles(math.rad(Angle), 0, 0))
+                    task.wait()
+
+                    FPos(BasePart, CFrame.new(0, 1.5, 0) + THumanoid.MoveDirection,CFrame.Angles(math.rad(Angle), 0, 0))
+                    task.wait()
+
+                    FPos(BasePart, CFrame.new(0, -1.5, 0) + THumanoid.MoveDirection,CFrame.Angles(math.rad(Angle), 0, 0))
+                    task.wait()
+                else
+                    FPos(BasePart, CFrame.new(0, 1.5, THumanoid.WalkSpeed), CFrame.Angles(math.rad(90), 0, 0))
+                    task.wait()
+
+                    FPos(BasePart, CFrame.new(0, -1.5, -THumanoid.WalkSpeed), CFrame.Angles(0, 0, 0))
+                    task.wait()
+
+                    FPos(BasePart, CFrame.new(0, 1.5, THumanoid.WalkSpeed), CFrame.Angles(math.rad(90), 0, 0))
+                    task.wait()
+                    
+                    FPos(BasePart, CFrame.new(0, 1.5, TRootPart.Velocity.Magnitude / 1.25), CFrame.Angles(math.rad(90), 0, 0))
+                    task.wait()
+
+                    FPos(BasePart, CFrame.new(0, -1.5, -TRootPart.Velocity.Magnitude / 1.25), CFrame.Angles(0, 0, 0))
+                    task.wait()
+
+                    FPos(BasePart, CFrame.new(0, 1.5, TRootPart.Velocity.Magnitude / 1.25), CFrame.Angles(math.rad(90), 0, 0))
+                    task.wait()
+
+                    FPos(BasePart, CFrame.new(0, -1.5, 0), CFrame.Angles(math.rad(90), 0, 0))
+                    task.wait()
+
+                    FPos(BasePart, CFrame.new(0, -1.5, 0), CFrame.Angles(0, 0, 0))
+                    task.wait()
+
+                    FPos(BasePart, CFrame.new(0, -1.5 ,0), CFrame.Angles(math.rad(-90), 0, 0))
+                    task.wait()
+
+                    FPos(BasePart, CFrame.new(0, -1.5, 0), CFrame.Angles(0, 0, 0))
+                    task.wait()
+                end
+            else
+                break
+            end
+        until BasePart.Velocity.Magnitude > 500 or not BasePart.Parent or TargetPlayer.Parent ~= Players or THumanoid.Sit or Humanoid.Health <= 0 or tick() > Time + TimeToWait
+    end
+
+    -- Start flinging based on what parts are available
+    if TRootPart and THead then
+        if (TRootPart.Position - THead.Position).Magnitude > 5 then
+            SFBasePart(THead)
+        else
+            SFBasePart(TRootPart)
+        end
+    elseif TRootPart then
+        SFBasePart(TRootPart)
+    elseif THead then
+        SFBasePart(THead)
+    elseif Handle then
+        SFBasePart(Handle)
+    end
+
+    -- Cleanup
+    pcall(function() BV:Destroy() end)
+
+    -- Re-enable states
+    Humanoid:SetStateEnabled(Enum.HumanoidStateType.Seated, true)
+    workspace.CurrentCamera.CameraSubject = Humanoid
+
+    -- Restore anti-fling
+    AntiFlingEnabled = oldAntiFling
+
+    -- Restore fallen parts destroy height
+    workspace.FallenPartsDestroyHeight = getgenv().FPDH
+
+    -- Return to original position
+    local returnStart = tick()
+    repeat
+        pcall(function()
+            RootPart.CFrame = getgenv().OldPos * CFrame.new(0, .5, 0)
+            Character:SetPrimaryPartCFrame(getgenv().OldPos * CFrame.new(0, .5, 0))
+            Humanoid:ChangeState(Enum.HumanoidStateType.GettingUp)
+            
+            -- Stop all velocities
+            for _, x in ipairs(Character:GetDescendants()) do
+                if x:IsA("BasePart") then
+                    x.Velocity = Vector3.new()
+                    x.RotVelocity = Vector3.new()
+                end
+            end
+        end)
+        task.wait(0.1)
+    until (RootPart.Position - getgenv().OldPos.Position).Magnitude < 25 or tick() - returnStart > 2
+
+    FlingNotify("Fling Success", "Successfully flung " .. TargetPlayer.Name, 3)
+    
+    -- Done flinging this target
+    isFlinging = false
+    currentFlingTarget = nil
+    if callback then callback() end
+end
+
+-- Updated fling functions that use the UI player selection
+local function FlingSelected()
+    if not SelectedPlayerName then
+        Notifier.new({Title = "Fling Error", Content = "No player selected", Duration = 2})
+        return
+    end
+    local target = Players:FindFirstChild(SelectedPlayerName)
+    if target and target ~= LocalPlayer and target.Character then
+        Notifier.new({Title = "Fling", Content = "Flinging " .. target.Name, Duration = 2})
+        task.spawn(SkidFling, target)
+    else
+        Notifier.new({Title = "Fling Error", Content = "Target invalid", Duration = 2})
+    end
+end
+
+local function FlingSheriff()
+    Notifier.new({Title = "Fling", Content = "Searching for Sheriff...", Duration = 2})
+    local sheriffFound = false
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer and isAlive(plr) and isSheriff(plr) then
+            Notifier.new({Title = "Fling", Content = "Found Sheriff: " .. plr.Name, Duration = 2})
+            task.spawn(SkidFling, plr)
+            sheriffFound = true
+            break
+        end
+    end
+    if not sheriffFound then
+        Notifier.new({Title = "Fling", Content = "No Sheriff found", Duration = 2})
+    end
+end
+
+local function FlingMurderer()
+    Notifier.new({Title = "Fling", Content = "Searching for Murderer...", Duration = 2})
+    local murdererFound = false
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer and isAlive(plr) and isMurderer(plr) then
+            Notifier.new({Title = "Fling", Content = "Found Murderer: " .. plr.Name, Duration = 2})
+            task.spawn(SkidFling, plr)
+            murdererFound = true
+            break
+        end
+    end
+    if not murdererFound then
+        Notifier.new({Title = "Fling", Content = "No Murderer found", Duration = 2})
+    end
+end
+
+-- NEW: Fling Innocents function
+local function FlingInnocents()
+    Notifier.new({Title = "Fling Innocents", Content = "Searching for Innocent players...", Duration = 2})
+    
+    local innocents = {}
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer and isAlive(plr) and isInnocent(plr) then
+            table.insert(innocents, plr)
+        end
+    end
+    
+    if #innocents == 0 then
+        Notifier.new({Title = "Fling Innocents", Content = "No Innocent players found", Duration = 3})
+        return
+    end
+    
+    Notifier.new({Title = "Fling Innocents", Content = "Found " .. #innocents .. " Innocent players", Duration = 2})
+    
+    -- Sequential flinging - one at a time
+    local function flingNext(index)
+        if index > #innocents then
+            Notifier.new({Title = "Fling Innocents", Content = "Finished flinging all Innocents", Duration = 3})
+            return
+        end
+        
+        local target = innocents[index]
+        Notifier.new({Title = "Fling Innocents", Content = "Flinging " .. target.Name .. " (" .. index .. "/" .. #innocents .. ")", Duration = 2})
+        
+        -- Fling and then continue to next
+        SkidFling(target, function()
+            task.wait(0.5) -- Small delay between flings
+            flingNext(index + 1)
+        end)
+    end
+    
+    flingNext(1)
+end
+
+local function FlingAll()
+    Notifier.new({Title = "Fling All", Content = "Starting to fling all players...", Duration = 3})
+    
+    local targets = {}
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer and isAlive(plr) then
+            table.insert(targets, plr)
+        end
+    end
+    
+    -- Sequential flinging - one at a time
+    local function flingNext(index)
+        if index > #targets then
+            Notifier.new({Title = "Fling All", Content = "Flung " .. #targets .. " players total", Duration = 4})
+            return
+        end
+        
+        local target = targets[index]
+        Notifier.new({Title = "Fling All", Content = "Flinging " .. target.Name .. " (" .. index .. "/" .. #targets .. ")", Duration = 2})
+        
+        -- Fling and then continue to next
+        SkidFling(target, function()
+            task.wait(0.5) -- Small delay between flings
+            flingNext(index + 1)
+        end)
+    end
+    
+    flingNext(1)
+end
+
+local function destroyAllPlayerHighlights()
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer and plr.Character then
+            CleanupESP(plr.Character)
+        end
+    end
+end
+
+local function getBestTarget()
+    if not featureEnabled.Aimbot then return nil end -- Only work if enabled
+    
+    if StickyEnabled and LockedTarget and isAlive(LockedTarget) then return LockedTarget end
+    local camera = Workspace.CurrentCamera
+    local mousePos = UserInputService:GetMouseLocation()
+    local bestTarget, bestScore = nil, math.huge
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer and isAlive(plr) and plr.Character:FindFirstChild("Head") then
+            if AimbotOnlyMurderer and not isMurderer(plr) then continue end
+            local head = plr.Character.Head
+            local screenPos, onScreen = camera:WorldToViewportPoint(head.Position)
+            if onScreen then
+                local dist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
+                if dist < AimbotFOV then
+                    local score = dist
+                    if isMurderer(plr) then score = score * 0.15 end
+                    if score < bestScore then
+                        bestScore = score
+                        bestTarget = plr
+                    end
+                end
+            end
+        end
+    end
+    if StickyEnabled and bestTarget then LockedTarget = bestTarget end
+    return bestTarget
+end
+
+local function getPredictedPosition(plr)
+    if not plr or not plr.Character then return nil end
+    local part = plr.Character:FindFirstChild(TargetPart) or plr.Character:FindFirstChild("Head")
+    if not part then return nil end
+    if not PredictionEnabled then return part.Position end
+    local hrp = plr.Character:FindFirstChild("HumanoidRootPart")
+    local vel = hrp and hrp.Velocity or Vector3.new()
+    return part.Position + (vel * AimbotPrediction)
+end
+
+local function updateAimbot()
+    if not AimbotEnabled or not featureEnabled.Aimbot or not HoldingMouse2 then return end
+    local targetPlr = getBestTarget()
+    if not targetPlr then return end
+    local predictedPos = getPredictedPosition(targetPlr)
+    if not predictedPos then return end
+    local camera = Workspace.CurrentCamera
+    local currentCFrame = camera.CFrame
+    local targetCFrame = CFrame.new(currentCFrame.Position, predictedPos)
+    if not PredictionEnabled then
+        camera.CFrame = targetCFrame
+    else
+        local smooth = isMurderer(targetPlr) and 0.78 or AimbotSmoothness
+        camera.CFrame = currentCFrame:Lerp(targetCFrame, smooth)
+    end
+    if targetPlr ~= LastLockedTarget then
+        LastLockedTarget = targetPlr
+        Notifier.new({Title = "Aimbot Locked", Content = "Target: " .. targetPlr.Name .. (isMurderer(targetPlr) and " (Murderer)" or ""), Duration = 1.8})
+    end
+end
+
+RunService:BindToRenderStep("AnnieAimbotCamlock", Enum.RenderPriority.Camera.Value + 1, updateAimbot)
+
 coroutine.wrap(function()
     RunService.Heartbeat:Connect(function()
         checkHealthForDesync()
         checkAutoAvoidMurderer()
-        if getgenv().Desync.Enabled then
+        if getgenv().Desync.Enabled and featureEnabled.Desync then
             local LocalCharacter = LocalPlayer.Character
             local LocalRootPart = LocalCharacter and LocalCharacter:FindFirstChild("HumanoidRootPart")
             if not LocalRootPart then return end
@@ -1692,31 +1645,29 @@ end)()
 
 task.spawn(function()
     while task.wait(0.25) do
-        pcall(function()
-            UpdateAllESPColors()
-            if HitboxEnabled then UpdateAllHitboxes() end
-            refreshToolGunESP()
-            highlightDroppedGun()
-            updateGunTracer()
-            ForceRefreshESP()
-        end)
+        UpdateAllESPColors()
+        if HitboxEnabled then UpdateAllHitboxes() end
+        refreshToolGunESP()
+        highlightDroppedGun()
+        updateGunTracer()
+        ForceRefreshESP()
     end
 end)
 
 Workspace.ChildAdded:Connect(function(child)
     if GunESPEnabled and child:IsA("Tool") and child.Name == "Gun" then
-        task.wait(0.05) 
-        pcall(function() createToolGunESP(child) end)
+        task.wait(0.05) createToolGunESP(child)
     end
 end)
 
 Workspace.DescendantAdded:Connect(function(d)
     if d.Name == "GunDrop" then
         task.wait(0.1)
-        if DroppedGunHighlightEnabled then pcall(function() highlightDroppedGun() end) end
+        if DroppedGunHighlightEnabled then highlightDroppedGun() end
         Notifier.new({Title = "Gun Dropped", Content = "The gun has been dropped", Duration = 4.5})
-        pcall(function() updateGunTracer() end)
+        updateGunTracer()
         
+        -- Only auto-teleport if player is NOT the murderer AND feature is enabled
         if AutoGunTPEnabled and not isMurderer(LocalPlayer) then
             TeleportToGunSnapBack()
         elseif AutoGunTPEnabled and isMurderer(LocalPlayer) then
@@ -1731,69 +1682,63 @@ end)
 
 Workspace.DescendantRemoving:Connect(function(d)
     if d.Name == "GunDrop" then
-        if CurrentGunTracer then pcall(function() CurrentGunTracer:Destroy() end) CurrentGunTracer = nil end
+        if CurrentGunTracer then CurrentGunTracer:Destroy() CurrentGunTracer = nil end
     end
 end)
 
--- KEYBINDS
+-- KEYBINDS - NOW CHECK IF FEATURE IS ENABLED FIRST
 UserInputService.InputBegan:Connect(function(input, gp)
     if gp then return end
     
     if input.KeyCode == Enum.KeyCode.U then
-        if HitboxEnabled then
-            VisualizeHitbox = not VisualizeHitbox
-            UpdateAllHitboxes()
-            Notifier.new({Title = "Hitbox Visuals", Content = VisualizeHitbox and "ON" or "OFF", Duration = 2})
-        else
-            Notifier.new({Title = "Hitbox Visuals", Content = "Enable Hitbox Expander first", Duration = 2})
-        end
+        VisualizeHitbox = not VisualizeHitbox
+        UpdateAllHitboxes()
+        Notifier.new({Title = "Hitbox Visuals", Content = VisualizeHitbox and "ON" or "OFF", Duration = 2})
     elseif input.KeyCode == Enum.KeyCode.Equals or input.KeyCode == Enum.KeyCode.Plus then
-        if HitboxEnabled then
-            HitboxSize = math.min(HitboxSize + HitboxStep, MaxHitboxSize)
-            UpdateAllHitboxes()
-            Notifier.new({Title = "Hitbox Size", Content = tostring(HitboxSize), Duration = 1.5})
-        end
+        HitboxSize = math.min(HitboxSize + HitboxStep, MaxHitboxSize)
+        UpdateAllHitboxes()
+        Notifier.new({Title = "Hitbox Size", Content = tostring(HitboxSize), Duration = 1.5})
     elseif input.KeyCode == Enum.KeyCode.Minus then
-        if HitboxEnabled then
-            HitboxSize = math.max(HitboxSize - HitboxStep, MinHitboxSize)
-            UpdateAllHitboxes()
-            Notifier.new({Title = "Hitbox Size", Content = tostring(HitboxSize), Duration = 1.5})
-        end
+        HitboxSize = math.max(HitboxSize - HitboxStep, MinHitboxSize)
+        UpdateAllHitboxes()
+        Notifier.new({Title = "Hitbox Size", Content = tostring(HitboxSize), Duration = 1.5})
     elseif input.KeyCode == Enum.KeyCode.G then
-        if GodModeEnabled then
-            GodModeEnabled = not GodModeEnabled
-            if GodModeEnabled then enableGodMode() end
-            Notifier.new({Title = "God Mode", Content = GodModeEnabled and "ON" or "OFF", Duration = 1.5})
-        else
-            Notifier.new({Title = "God Mode", Content = "Enable from UI first", Duration = 2})
+        if not featureEnabled.GodMode then
+            Notifier.new({Title = "God Mode", Content = "Enable God Mode in UI first", Duration = 3})
+            return
         end
+        GodModeEnabled = not GodModeEnabled
+        if GodModeEnabled then enableGodMode() end
+        Notifier.new({Title = "God Mode", Content = GodModeEnabled and "ON" or "OFF", Duration = 1.5})
     elseif input.KeyCode == Enum.KeyCode.Q then
-        if AimbotEnabled then
-            AimbotEnabled = not AimbotEnabled
-            Notifier.new({Title = "Aimbot", Content = AimbotEnabled and "ON" or "OFF", Duration = 1.5})
+        if not featureEnabled.Aimbot then
+            Notifier.new({Title = "Aimbot", Content = "Enable Aimbot in UI first", Duration = 3})
+            return
         end
+        AimbotEnabled = not AimbotEnabled
+        Notifier.new({Title = "Aimbot", Content = AimbotEnabled and "ON" or "OFF", Duration = 1.5})
     elseif input.KeyCode == Enum.KeyCode.Z then
-        if getgenv().Desync.Enabled then
-            local newDesync = not getgenv().Desync.Enabled
-            getgenv().Desync.Enabled = newDesync
-            if not newDesync then
-                getgenv().Desync.AutoAvoidActive = false
-            end
-            Notifier.new({Title = "Desync", Content = newDesync and "ON" or "OFF", Duration = 2})
+        if not featureEnabled.Desync then
+            Notifier.new({Title = "Desync", Content = "Enable Desync in UI first", Duration = 3})
+            return
         end
+        local newDesync = not getgenv().Desync.Enabled
+        getgenv().Desync.Enabled = newDesync
+        if not newDesync then
+            getgenv().Desync.AutoAvoidActive = false
+        end
+        Notifier.new({Title = "Desync", Content = newDesync and "ON" or "OFF", Duration = 2})
     elseif input.KeyCode == Enum.KeyCode.K then
-        if KillAuraEnabled then
-            PerformKillAll()
-        else
-            Notifier.new({Title = "Kill All", Content = "Enable Kill Aura first", Duration = 2})
+        if not featureEnabled.KillAura then
+            Notifier.new({Title = "Kill All", Content = "Enable Kill Aura in UI first", Duration = 3})
+            return
         end
+        PerformKillAll()
     end
 end)
 
 UserInputService.InputBegan:Connect(function(input)
-    if input.UserInputType == Enum.UserInputType.MouseButton2 then 
-        HoldingMouse2 = AimbotEnabled 
-    end
+    if input.UserInputType == Enum.UserInputType.MouseButton2 then HoldingMouse2 = AimbotEnabled end
 end)
 
 UserInputService.InputEnded:Connect(function(input)
@@ -1804,10 +1749,23 @@ UserInputService.InputEnded:Connect(function(input)
     end
 end)
 
--- =====================================================================
--- UI SECTIONS - VISUALS TAB
--- =====================================================================
+local OriginalCFrameHook = nil
+OriginalCFrameHook = hookmetamethod(game, "__index", newcclosure(function(Self, Key)
+    if getgenv().Desync.Enabled and featureEnabled.Desync then
+        if not checkcaller() then
+            if Key == "CFrame" and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") and LocalPlayer.Character:FindFirstChild("Humanoid") and LocalPlayer.Character.Humanoid.Health > 0 then
+                if Self == LocalPlayer.Character.HumanoidRootPart then
+                    return DesyncData.OriginalCFrame or CFrame.new()
+                elseif Self == LocalPlayer.Character.Head then
+                    return DesyncData.OriginalCFrame or CFrame.new()
+                end
+            end
+        end
+    end
+    return OriginalCFrameHook(Self, Key)
+end))
 
+-- VISUALS TAB
 local VisualsPlayerSection = VisualsTab:DrawSection({
     Name = "Player ESP",
     Position = 'left'
@@ -1867,8 +1825,8 @@ local GunDropHighlightToggle = VisualsGunSection:AddToggle({
         if not v then
             for _,o in ipairs(Workspace:GetDescendants()) do
                 if o.Name=="GunDrop" then
-                    if o:FindFirstChild("GunDropHighlight") then pcall(function() o.GunDropHighlight:Destroy() end) end
-                    if o:FindFirstChild("GunDropLabel") then pcall(function() o.GunDropLabel:Destroy() end) end
+                    if o:FindFirstChild("GunDropHighlight") then o.GunDropHighlight:Destroy() end
+                    if o:FindFirstChild("GunDropLabel") then o.GunDropLabel:Destroy() end
                 end
             end
         end
@@ -1881,58 +1839,11 @@ local GunTracerToggle = VisualsGunSection:AddToggle({
     Default = true,
     Callback = function(v)
         GunTracerEnabled = v
-        if not v and CurrentGunTracer then pcall(function() CurrentGunTracer:Destroy() end) CurrentGunTracer = nil end
+        if not v and CurrentGunTracer then CurrentGunTracer:Destroy() CurrentGunTracer = nil end
     end
 })
 
--- Silent Aim Visuals Section
-local VisualsSilentAimSection = VisualsTab:DrawSection({
-    Name = "Silent Aim Visuals",
-    Position = 'left'
-})
-
-local SilentAimVisualizerToggle = VisualsSilentAimSection:AddToggle({
-    Name = "Show 3D Silent Aim Target",
-    Flag = "SilentAim_Visualizer",
-    Default = false,
-    Callback = function(v)
-        silentAimVisualizerEnabled = v
-        if not v and silentAimVisualizerBall then
-            silentAimVisualizerBall.Transparency = 1
-        end
-    end
-})
-
--- Adaptive Prediction Toggle - CORRECTED BEHAVIOR
-AdaptivePredictionToggle = VisualsSilentAimSection:AddToggle({
-    Name = "Adaptive Prediction (Velocity + Ping)",
-    Flag = "Adaptive_Prediction",
-    Default = false,
-    Callback = function(v)
-        adaptivePredictionEnabled = v
-        if v then
-            -- When adaptive is ON, it overrides manual prediction
-            -- Visualizer should move and show CYAN
-            Notifier.new({
-                Title = "Adaptive Prediction",
-                Content = "ON - Velocity + Ping adjusted (Cyan ball)",
-                Duration = 2
-            })
-        else
-            -- When adaptive is OFF, prediction state determines behavior
-            Notifier.new({
-                Title = "Adaptive Prediction",
-                Content = "OFF - Using manual prediction settings",
-                Duration = 2
-            })
-        end
-    end
-})
-
--- =====================================================================
--- UI SECTIONS - SHERIFF TAB
--- =====================================================================
-
+-- SHERIFF TAB
 local SheriffCameraSection = SheriffTab:DrawSection({
     Name = "Camera Aimbot",
     Position = 'left'
@@ -1943,7 +1854,11 @@ AimbotToggle = SheriffCameraSection:AddToggle({
     Flag = "Aimbot_Enabled",
     Default = false,
     Callback = function(v)
-        AimbotEnabled = v
+        featureEnabled.Aimbot = v
+        if not v then 
+            AimbotEnabled = false
+            LockedTarget = nil
+        end
         Notifier.new({
             Title = "Camera Aimbot",
             Content = v and "Enabled" or "Disabled",
@@ -1990,7 +1905,6 @@ SheriffCameraSection:AddSlider({
     Flag = "Aimbot_PredStrength",
     Callback = function(v)
         AimbotPrediction = v
-        basePrediction = v
     end
 })
 
@@ -2065,36 +1979,16 @@ local AimPartDropdown = SheriffSilentSection:AddDropdown({
     end
 })
 
--- Prediction Toggle - CORRECTED BEHAVIOR
-PredictionEnabledToggle = SheriffSilentSection:AddToggle({
+local PredictionEnabledToggle = SheriffSilentSection:AddToggle({
     Name = "Enable Prediction",
     Flag = "PredictionEnabled",
-    Default = false,  -- Start OFF
+    Default = true,
     Callback = function(value)
-        if adaptivePredictionEnabled then
-            -- If adaptive is on, we can still toggle manual prediction
-            -- but adaptive will take priority in the backend
-            predictionEnabled = value
-            Notifier.new({
-                Title = "Manual Prediction",
-                Content = value and "ON (but Adaptive has priority)" or "OFF",
-                Duration = 2
-            })
-        else
-            predictionEnabled = value
-            -- When prediction is OFF, visualizer shows raw position (white ball)
-            -- When prediction is ON, visualizer shows manual prediction (purple ball)
-            Notifier.new({
-                Title = "Manual Prediction",
-                Content = value and "ON - Purple ball" or "OFF - White ball (raw position)",
-                Duration = 2
-            })
-        end
+        predictionEnabled = value
     end,
 })
 
--- Prediction Slider
-PredictionAmountSlider = SheriffSilentSection:AddSlider({
+local PredictionAmountSlider = SheriffSilentSection:AddSlider({
     Name = "Prediction Strength",
     Min = 0,
     Max = 0.5,
@@ -2102,14 +1996,7 @@ PredictionAmountSlider = SheriffSilentSection:AddSlider({
     Round = 3,
     Flag = "PredictionAmount",
     Callback = function(value)
-        if adaptivePredictionEnabled then
-            -- Slider still works but adaptive will override in backend
-            predictionAmount = value
-            basePrediction = value
-        else
-            predictionAmount = value
-            basePrediction = value
-        end
+        predictionAmount = value
     end
 })
 
@@ -2128,20 +2015,18 @@ local TriggerbotToggle = SheriffTriggerSection:AddToggle({
     end,
 })
 
--- =====================================================================
--- UI SECTIONS - MURDERER TAB
--- =====================================================================
-
+-- MURDERER TAB
 local MurdererRageSection = MurdererTab:DrawSection({
     Name = "Rage Features",
     Position = 'left'
 })
 
-KillAuraToggle = MurdererRageSection:AddToggle({
+local KillAuraToggle = MurdererRageSection:AddToggle({
     Name = "Enable Kill Aura",
     Flag = "KillAura_Enabled",
     Default = false,
     Callback = function(Value)
+        featureEnabled.KillAura = Value
         KillAuraEnabled = Value
         Notifier.new({Title = "Kill Aura", Content = Value and "Enabled" or "Disabled", Duration = 2})
     end,
@@ -2197,7 +2082,7 @@ local HitboxEnabledToggle = MurdererHitboxSection:AddToggle({
     end,
 })
 
-VisualizeHitboxToggle = MurdererHitboxSection:AddToggle({
+local VisualizeHitboxToggle = MurdererHitboxSection:AddToggle({
     Name = "Visualize Hitboxes",
     Flag = "VisualizeHitbox",
     Default = false,
@@ -2220,21 +2105,19 @@ local HitboxSizeSlider = MurdererHitboxSection:AddSlider({
     end
 })
 
--- =====================================================================
--- UI SECTIONS - EXPLOIT TAB
--- =====================================================================
-
+-- EXPLOIT TAB
 local ExploitSurvivalSection = ExploitTab:DrawSection({
     Name = "Survival Features",
     Position = 'left'
 })
 
-GodModeToggle = ExploitSurvivalSection:AddToggle({
+local GodModeToggle = ExploitSurvivalSection:AddToggle({
     Name = "Enable God Mode",
     Flag = "GodMode_Enabled",
     Default = false,
     Risky = true,
     Callback = function(v)
+        featureEnabled.GodMode = v
         GodModeEnabled = v
         if v then
             enableGodMode()
@@ -2259,26 +2142,34 @@ local ExploitDesyncSection = ExploitTab:DrawSection({
 })
 
 DesyncToggle = ExploitDesyncSection:AddToggle({
-    Name = "Enable Desync",
+    Name = "Enable Desync (Z to toggle)",
     Flag = "Desync_Enabled",
     Default = false,
     Callback = function(v)
+        featureEnabled.Desync = v
         getgenv().Desync.Enabled = v
         if not v then getgenv().Desync.AutoAvoidActive = false end
     end,
 })
+
+SetDesyncToggle = function(value)
+    DesyncToggle:Set(value)
+end
 
 local DesyncKeybind = ExploitDesyncSection:AddKeybind({
     Name = "Desync Keybind",
     Default = "Z",
     Flag = "Desync_Keybind",
     Callback = function()
-        if getgenv().Desync.Enabled then
-            local newValue = not getgenv().Desync.Enabled
-            getgenv().Desync.Enabled = newValue
-            if not newValue then getgenv().Desync.AutoAvoidActive = false end
-            Notifier.new({Title = "Desync", Content = newValue and "ON" or "OFF", Duration = 2})
+        if not featureEnabled.Desync then
+            Notifier.new({Title = "Desync", Content = "Enable Desync in UI first", Duration = 3})
+            return
         end
+        local newValue = not getgenv().Desync.Enabled
+        getgenv().Desync.Enabled = newValue
+        if not newValue then getgenv().Desync.AutoAvoidActive = false end
+        SetDesyncToggle(newValue)
+        Notifier.new({Title = "Desync", Content = newValue and "ON" or "OFF", Duration = 2})
     end,
 })
 
@@ -2404,10 +2295,7 @@ local AutoAvoidParagraph = ExploitAutoAvoidSection:AddParagraph({
     Content = "Sky desync activates when murderer is nearby."
 })
 
--- =====================================================================
--- UI SECTIONS - PLAYERS TAB
--- =====================================================================
-
+-- PLAYERS TAB
 local PlayersTeleportsSection = PlayersTab:DrawSection({
     Name = "Teleports",
     Position = 'left'
@@ -2476,7 +2364,7 @@ local PlayerDropdown = PlayersSelectorSection:AddDropdown({
     end
 })
 
--- Auto-refresh player list
+-- Auto-refresh player list every 2 seconds
 task.spawn(function()
     while task.wait(2) do
         if PlayerDropdown then
@@ -2523,6 +2411,14 @@ local FlingMurdererButton = PlayersActionsSection:AddButton({
     end,
 })
 
+-- NEW: Fling Innocents Button
+local FlingInnocentsButton = PlayersActionsSection:AddButton({
+    Name = "Fling Innocents",
+    Callback = function()
+        FlingInnocents()
+    end,
+})
+
 local FlingAllButton = PlayersActionsSection:AddButton({
     Name = "Fling All",
     Callback = function()
@@ -2553,10 +2449,7 @@ local SpectateToggle = PlayersActionsSection:AddToggle({
     end,
 })
 
--- =====================================================================
--- UI SECTIONS - SETTINGS TAB
--- =====================================================================
-
+-- SETTINGS TAB
 local UISettingsSection = SettingsTab:DrawSection({
     Name = "UI Settings",
     Position = 'left'
@@ -2629,10 +2522,7 @@ ThemeSection:AddDropdown({
     end,
 })
 
--- =====================================================================
--- CONFIG TAB
--- =====================================================================
-
+-- Creating Config Tab --
 local ConfigUI = Window:DrawConfig({
     Name = "Config",
     Icon = "folder",
@@ -2641,11 +2531,11 @@ local ConfigUI = Window:DrawConfig({
 
 ConfigUI:Init()
 
--- Load configuration if exists
+-- Load configuration if exists --
 ConfigManager:LoadConfig("AnnieConfig")
 
 Notifier.new({
     Title = "I Love Annie - MM2",
-    Content = "Script loaded! Press P to toggle UI | K for Kill All",
+    Content = "Script loaded! Press P to toggle UI | K for Kill All (must enable Kill Aura first)",
     Duration = 5
 })
