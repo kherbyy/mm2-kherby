@@ -101,6 +101,14 @@ local predictionAmount = 0.168
 local aimPart = "Head"
 local originalGetTarget = nil
 
+-- Advanced Prediction Variables
+local adaptivePredictionEnabled = true
+local basePrediction = 0.168
+local minPrediction = 0.05
+local maxPrediction = 0.35
+local velocitySmoothing = 0.5
+local lastVelocities = {}
+
 -- Silent Aim 3D Visualizer
 local silentAimVisualizerEnabled = false
 local silentAimVisualizerBall = nil
@@ -144,6 +152,44 @@ local function isSheriff(plr)
     return false
 end
 
+-- Advanced Adaptive Prediction Function
+local function getAdaptivePrediction(plr)
+    if not plr or not plr.Character then return basePrediction end
+    
+    local hrp = plr.Character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return basePrediction end
+    
+    local velocity = hrp.Velocity.Magnitude
+    
+    -- Store last few velocities for smoothing
+    table.insert(lastVelocities, velocity)
+    if #lastVelocities > 5 then
+        table.remove(lastVelocities, 1)
+    end
+    
+    -- Calculate average velocity
+    local avgVelocity = 0
+    for _, v in ipairs(lastVelocities) do
+        avgVelocity = avgVelocity + v
+    end
+    avgVelocity = avgVelocity / #lastVelocities
+    
+    -- Dynamic prediction based on velocity
+    -- Fast players need more prediction, slow players need less
+    local dynamicPrediction = basePrediction
+    
+    if avgVelocity > 30 then -- Running
+        dynamicPrediction = math.min(basePrediction * (avgVelocity / 20), maxPrediction)
+    elseif avgVelocity < 10 then -- Walking or standing
+        dynamicPrediction = math.max(basePrediction * 0.5, minPrediction)
+    end
+    
+    -- Smooth the transition
+    local smoothedPrediction = (dynamicPrediction * velocitySmoothing) + (basePrediction * (1 - velocitySmoothing))
+    
+    return smoothedPrediction
+end
+
 local function getMurdererTargetPosition()
     for _, plr in ipairs(Players:GetPlayers()) do
         if plr ~= LocalPlayer and isAlive(plr) and isMurderer(plr) then
@@ -156,7 +202,14 @@ local function getMurdererTargetPosition()
                 if predictionEnabled then
                     local hrp = character:FindFirstChild("HumanoidRootPart")
                     if hrp and hrp.Velocity and hrp.Velocity.Magnitude > 3 then
-                        targetPos = targetPos + (hrp.Velocity * predictionAmount)
+                        if adaptivePredictionEnabled then
+                            -- Use adaptive prediction based on velocity
+                            local adaptiveAmount = getAdaptivePrediction(plr)
+                            targetPos = targetPos + (hrp.Velocity * adaptiveAmount)
+                        else
+                            -- Use fixed prediction
+                            targetPos = targetPos + (hrp.Velocity * predictionAmount)
+                        end
                     end
                 end
                 
@@ -1806,6 +1859,16 @@ local SilentAimVisualizerToggle = VisualsSilentAimSection:AddToggle({
     end
 })
 
+-- Add Adaptive Prediction toggle
+local AdaptivePredictionToggle = VisualsSilentAimSection:AddToggle({
+    Name = "Adaptive Prediction (Auto-adjust)",
+    Flag = "Adaptive_Prediction",
+    Default = true,
+    Callback = function(v)
+        adaptivePredictionEnabled = v
+    end
+})
+
 local SheriffCameraSection = SheriffTab:DrawSection({
     Name = "Camera Aimbot",
     Position = 'left'
@@ -1863,6 +1926,7 @@ SheriffCameraSection:AddSlider({
     Flag = "Aimbot_PredStrength",
     Callback = function(v)
         AimbotPrediction = v
+        basePrediction = v
     end
 })
 
@@ -1955,6 +2019,7 @@ local PredictionAmountSlider = SheriffSilentSection:AddSlider({
     Flag = "PredictionAmount",
     Callback = function(value)
         predictionAmount = value
+        basePrediction = value
     end
 })
 
