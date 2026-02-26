@@ -119,7 +119,7 @@ end
 
 local function isMurderer(plr)
     if not plr then return false end
-    return (plr.Backpack:FindFirstChild("Knife") or (plr.Character and plr.Character:FindFirstChild("Knife")))
+    return (plr.Backpack and (plr.Backpack:FindFirstChild("Knife") or (plr.Character and plr.Character:FindFirstChild("Knife"))))
 end
 
 local function isAlive(plr)
@@ -132,7 +132,7 @@ local function isSheriff(plr)
     if not plr then return false end
     local gunNames = {"Gun", "Revolver"}
     for _, name in ipairs(gunNames) do
-        if plr.Backpack:FindFirstChild(name) or (plr.Character and plr.Character:FindFirstChild(name)) then
+        if plr.Backpack and (plr.Backpack:FindFirstChild(name) or (plr.Character and plr.Character:FindFirstChild(name))) then
             return true
         end
     end
@@ -345,7 +345,9 @@ local function ForceRefreshESP()
     if not ESPEnabled then return end
     for _, plr in ipairs(Players:GetPlayers()) do
         if plr ~= LocalPlayer and plr.Character and isAlive(plr) then
-            CreateESP(plr.Character, plr)
+            pcall(function()
+                CreateESP(plr.Character, plr)
+            end)
         end
     end
 end
@@ -363,22 +365,48 @@ local function UpdateAllESPColors()
     end
 end
 
+-- FIXED SetupPlayerESP function with proper error handling
 local function SetupPlayerESP(plr)
     if plr == LocalPlayer then return end
+    
     local function OnToolChange()
         task.wait(0.08)
         if ESPEnabled and plr.Character and isAlive(plr) then
-            CreateESP(plr.Character, plr)
+            pcall(function()
+                CreateESP(plr.Character, plr)
+            end)
         else
             UpdateAllESPColors()
         end
     end
-    plr.Backpack.ChildAdded:Connect(function(c)
-        if c.Name == "Knife" or c.Name == "Gun" or c.Name == "Revolver" then OnToolChange() end
+    
+    -- Safely connect to backpack events
+    local function connectBackpackEvents()
+        local success, backpack = pcall(function()
+            return plr:FindFirstChild("Backpack")
+        end)
+        
+        if success and backpack then
+            backpack.ChildAdded:Connect(function(c)
+                if c.Name == "Knife" or c.Name == "Gun" or c.Name == "Revolver" then OnToolChange() end
+            end)
+            backpack.ChildRemoved:Connect(function(c)
+                if c.Name == "Knife" or c.Name == "Gun" or c.Name == "Revolver" then OnToolChange() end
+            end)
+        end
+    end
+    
+    -- Connect backpack events when player loads
+    connectBackpackEvents()
+    
+    -- Also connect when player's Backpack is added
+    plr.ChildAdded:Connect(function(child)
+        if child.Name == "Backpack" then
+            connectBackpackEvents()
+        end
     end)
-    plr.Backpack.ChildRemoved:Connect(function(c)
-        if c.Name == "Knife" or c.Name == "Gun" or c.Name == "Revolver" then OnToolChange() end
-    end)
+    
+    -- Handle character
     if plr.Character then
         plr.Character.ChildAdded:Connect(function(c)
             if c.Name == "Knife" or c.Name == "Gun" or c.Name == "Revolver" then OnToolChange() end
@@ -387,34 +415,55 @@ local function SetupPlayerESP(plr)
             if c.Name == "Knife" or c.Name == "Gun" or c.Name == "Revolver" then OnToolChange() end
         end)
     end
+    
     plr.CharacterAdded:Connect(function(char)
         task.wait(0.85)
         if ESPEnabled and char.Parent then
-            CreateESP(char, plr)
+            pcall(function()
+                CreateESP(char, plr)
+            end)
         end
+        
+        char.ChildAdded:Connect(function(c)
+            if c.Name == "Knife" or c.Name == "Gun" or c.Name == "Revolver" then OnToolChange() end
+        end)
+        char.ChildRemoved:Connect(function(c)
+            if c.Name == "Knife" or c.Name == "Gun" or c.Name == "Revolver" then OnToolChange() end
+        end)
     end)
+    
     plr.CharacterRemoving:Connect(function(char)
         CleanupESP(char)
     end)
+    
     if plr.Character then
         task.spawn(function()
             task.wait(1.2)
-            if ESPEnabled then CreateESP(plr.Character, plr) end
+            if ESPEnabled then 
+                pcall(function()
+                    CreateESP(plr.Character, plr)
+                end)
+            end
         end)
     end
 end
 
 for _, plr in ipairs(Players:GetPlayers()) do
-    SetupPlayerESP(plr)
+    pcall(function()
+        SetupPlayerESP(plr)
+    end)
 end
 
-Players.PlayerAdded:Connect(SetupPlayerESP)
+Players.PlayerAdded:Connect(function(plr)
+    pcall(function()
+        SetupPlayerESP(plr)
+    end)
+end)
 
 local GunESPEnabled = true
 local DroppedGunHighlightEnabled = true
 local TriggerbotEnabled = false
 local GodModeEnabled = false
-local GodModeHotkeyUnlocked = false
 local AntiFlingEnabled = false
 local HitboxEnabled = false
 local VisualizeHitbox = false
@@ -440,12 +489,12 @@ local KillAuraRange = 25
 local lastAttack = tick()
 local SelectedPlayerName = nil
 local OriginalCameraSubject = nil
-local AimbotToggle, GodModeToggle, VisualizeHitboxToggle, DesyncToggle
+local AimbotToggle, GodModeToggle, VisualizeHitboxToggle, DesyncToggle, KillAuraToggle
 local SetDesyncToggle = nil
 local antiFlingCleanup = nil
 
 local function hasGun()
-    return LocalPlayer.Backpack:FindFirstChild("Gun") or (LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Gun"))
+    return LocalPlayer.Backpack and (LocalPlayer.Backpack:FindFirstChild("Gun") or (LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Gun")))
 end
 
 local function getNearestMurdererDistance()
@@ -811,7 +860,9 @@ end
 local function destroyAllPlayerHighlights()
     for _, plr in ipairs(Players:GetPlayers()) do
         if plr ~= LocalPlayer and plr.Character then
-            CleanupESP(plr.Character)
+            pcall(function()
+                CleanupESP(plr.Character)
+            end)
         end
     end
 end
@@ -822,7 +873,7 @@ local function getBestTarget()
     local mousePos = UserInputService:GetMouseLocation()
     local bestTarget, bestScore = nil, math.huge
     for _, plr in ipairs(Players:GetPlayers()) do
-        if plr ~= LocalPlayer and isAlive(plr) and plr.Character:FindFirstChild("Head") then
+        if plr ~= LocalPlayer and isAlive(plr) and plr.Character and plr.Character:FindFirstChild("Head") then
             if AimbotOnlyMurderer and not isMurderer(plr) then continue end
             local head = plr.Character.Head
             local screenPos, onScreen = camera:WorldToViewportPoint(head.Position)
@@ -926,7 +977,7 @@ local function setupAntiFling()
         if part:IsA("BodyVelocity") or part:IsA("BodyPosition") or part:IsA("BodyAngularVelocity") or part:IsA("BodyGyro") or part:IsA("BodyThrust") then
             task.wait()
             if part and part.Parent then
-                part:Destroy()
+                pcall(function() part:Destroy() end)
             end
         end
     end
@@ -977,7 +1028,7 @@ local function enableGodMode()
             newHumanoid.Parent = character
             newHumanoid.Name = "Humanoid"
             task.wait(0.1)
-            character["1"]:Destroy()
+            pcall(function() character["1"]:Destroy() end)
             Workspace.CurrentCamera.CameraSubject = character
             if character:FindFirstChild("Animate") then
                 character.Animate.Disabled = true
@@ -992,7 +1043,7 @@ end
 local function getCurrentMap()
     if CurrentMapCache and CurrentMapCache.Parent then return CurrentMapCache end
     for _, v in ipairs(Workspace:GetDescendants()) do
-        if v.Name == "Spawns" and v.Parent.Name ~= "Lobby" then
+        if v.Name == "Spawns" and v.Parent and v.Parent.Name ~= "Lobby" then
             CurrentMapCache = v.Parent
             return CurrentMapCache
         end
@@ -1003,12 +1054,12 @@ end
 
 local function updateGunTracer()
     if not GunTracerEnabled then
-        if CurrentGunTracer then CurrentGunTracer:Destroy() CurrentGunTracer = nil end
+        if CurrentGunTracer then pcall(function() CurrentGunTracer:Destroy() end) CurrentGunTracer = nil end
         return
     end
     local character = LocalPlayer.Character
     if not character or not character:FindFirstChild("HumanoidRootPart") then
-        if CurrentGunTracer then CurrentGunTracer:Destroy() CurrentGunTracer = nil end
+        if CurrentGunTracer then pcall(function() CurrentGunTracer:Destroy() end) CurrentGunTracer = nil end
         return
     end
     local gunDrop = nil
@@ -1021,7 +1072,7 @@ local function updateGunTracer()
                 CurrentGunTracer.Attachment1.Parent = gunDrop
             end
         else
-            if CurrentGunTracer then CurrentGunTracer:Destroy() end
+            if CurrentGunTracer then pcall(function() CurrentGunTracer:Destroy() end) end
             local att0 = Instance.new("Attachment")
             att0.Name = "TracerAtt0"
             att0.Parent = character.HumanoidRootPart
@@ -1043,7 +1094,7 @@ local function updateGunTracer()
             CurrentGunTracer = beam
         end
     else
-        if CurrentGunTracer then CurrentGunTracer:Destroy() CurrentGunTracer = nil end
+        if CurrentGunTracer then pcall(function() CurrentGunTracer:Destroy() end) CurrentGunTracer = nil end
     end
 end
 
@@ -1051,8 +1102,8 @@ local function highlightDroppedGun()
     if not DroppedGunHighlightEnabled then
         for _, obj in ipairs(Workspace:GetDescendants()) do
             if obj.Name == "GunDrop" then
-                if obj:FindFirstChild("GunDropHighlight") then obj.GunDropHighlight:Destroy() end
-                if obj:FindFirstChild("GunDropLabel") then obj.GunDropLabel:Destroy() end
+                if obj:FindFirstChild("GunDropHighlight") then pcall(function() obj.GunDropHighlight:Destroy() end) end
+                if obj:FindFirstChild("GunDropLabel") then pcall(function() obj.GunDropLabel:Destroy() end) end
             end
         end
         return
@@ -1062,7 +1113,7 @@ local function highlightDroppedGun()
     local gunDrop = currentMap:FindFirstChild("GunDrop")
     if not gunDrop then gunDrop = Workspace:FindFirstChild("GunDrop") end
     if gunDrop and not gunDrop:FindFirstChild("GunDropHighlight") then
-        if gunDrop:FindFirstChild("GunDropLabel") then gunDrop.GunDropLabel:Destroy() end
+        if gunDrop:FindFirstChild("GunDropLabel") then pcall(function() gunDrop.GunDropLabel:Destroy() end) end
         local hl = Instance.new("Highlight")
         hl.Name = "GunDropHighlight"
         hl.Adornee = gunDrop
@@ -1117,14 +1168,16 @@ end
 local function refreshToolGunESP()
     if not GunESPEnabled then
         for _, obj in ipairs(Workspace:GetChildren()) do
-            if obj:FindFirstChild("GunDroppedESP") then obj.GunDroppedESP:Destroy() end
-            if obj:FindFirstChild("GunLabel") then obj.GunLabel:Destroy() end
+            if obj:FindFirstChild("GunDroppedESP") then pcall(function() obj.GunDroppedESP:Destroy() end) end
+            if obj:FindFirstChild("GunLabel") then pcall(function() obj.GunLabel:Destroy() end) end
         end
         return
     end
     for _, obj in ipairs(Workspace:GetChildren()) do
         if obj:IsA("Tool") and obj.Name == "Gun" then
-            createToolGunESP(obj)
+            pcall(function()
+                createToolGunESP(obj)
+            end)
         end
     end
 end
@@ -1180,7 +1233,7 @@ local function ResetHitboxes()
         local HRP = Player.Character:FindFirstChild("HumanoidRootPart")
         if HRP then HRP.Size = Vector3.new(2, 2, 1) end
         if BoxHandles[Player.Character] then
-            BoxHandles[Player.Character]:Destroy()
+            pcall(function() BoxHandles[Player.Character]:Destroy() end)
             BoxHandles[Player.Character] = nil
         end
     end
@@ -1207,12 +1260,12 @@ RunService.Heartbeat:Connect(function()
     if not KillAuraEnabled then return end
     local character = LocalPlayer.Character
     if not character or not character:FindFirstChild("HumanoidRootPart") then return end
-    local Knife = LocalPlayer.Backpack:FindFirstChild("Knife") or character:FindFirstChild("Knife")
+    local Knife = LocalPlayer.Backpack and (LocalPlayer.Backpack:FindFirstChild("Knife") or character:FindFirstChild("Knife"))
     if not Knife or not Knife:FindFirstChild("Handle") then return end
     if (tick() - lastAttack) < 0.1 then return end
     for _, plr in ipairs(Players:GetPlayers()) do
         if plr ~= LocalPlayer and isAlive(plr) then
-            local root = plr.Character:FindFirstChild("HumanoidRootPart")
+            local root = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
             if root then
                 local dist = (root.Position - character.HumanoidRootPart.Position).Magnitude
                 if dist <= KillAuraRange and dist > 1 then
@@ -1232,7 +1285,7 @@ end)
 local function PerformKillAll()
     local character = LocalPlayer.Character
     if not character then return end
-    local Knife = LocalPlayer.Backpack:FindFirstChild("Knife") or character:FindFirstChild("Knife")
+    local Knife = LocalPlayer.Backpack and (LocalPlayer.Backpack:FindFirstChild("Knife") or character:FindFirstChild("Knife"))
     if not Knife then
         Notifier.new({Title = "Kill All", Content = "No Knife (must be Murderer)", Duration = 3})
         return
@@ -1248,8 +1301,8 @@ local function PerformKillAll()
     local count = 0
     for _, plr in ipairs(Players:GetPlayers()) do
         if plr ~= LocalPlayer and isAlive(plr) then
-            local root = plr.Character:FindFirstChild("HumanoidRootPart")
-            if root and Knife:FindFirstChild("Handle") then
+            local root = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
+            if root and Knife and Knife:FindFirstChild("Handle") then
                 firetouchinterest(root, Knife.Handle, 1)
                 firetouchinterest(root, Knife.Handle, 0)
                 count = count + 1
@@ -1439,27 +1492,30 @@ end)()
 
 task.spawn(function()
     while task.wait(0.25) do
-        UpdateAllESPColors()
-        if HitboxEnabled then UpdateAllHitboxes() end
-        refreshToolGunESP()
-        highlightDroppedGun()
-        updateGunTracer()
-        ForceRefreshESP()
+        pcall(function()
+            UpdateAllESPColors()
+            if HitboxEnabled then UpdateAllHitboxes() end
+            refreshToolGunESP()
+            highlightDroppedGun()
+            updateGunTracer()
+            ForceRefreshESP()
+        end)
     end
 end)
 
 Workspace.ChildAdded:Connect(function(child)
     if GunESPEnabled and child:IsA("Tool") and child.Name == "Gun" then
-        task.wait(0.05) createToolGunESP(child)
+        task.wait(0.05) 
+        pcall(function() createToolGunESP(child) end)
     end
 end)
 
 Workspace.DescendantAdded:Connect(function(d)
     if d.Name == "GunDrop" then
         task.wait(0.1)
-        if DroppedGunHighlightEnabled then highlightDroppedGun() end
+        if DroppedGunHighlightEnabled then pcall(function() highlightDroppedGun() end) end
         Notifier.new({Title = "Gun Dropped", Content = "The gun has been dropped", Duration = 4.5})
-        updateGunTracer()
+        pcall(function() updateGunTracer() end)
         
         if AutoGunTPEnabled and not isMurderer(LocalPlayer) then
             TeleportToGunSnapBack()
@@ -1475,18 +1531,21 @@ end)
 
 Workspace.DescendantRemoving:Connect(function(d)
     if d.Name == "GunDrop" then
-        if CurrentGunTracer then CurrentGunTracer:Destroy() CurrentGunTracer = nil end
+        if CurrentGunTracer then pcall(function() CurrentGunTracer:Destroy() end) CurrentGunTracer = nil end
     end
 end)
 
+-- FIXED KEYBINDS - Only work when UI toggle is enabled
 UserInputService.InputBegan:Connect(function(input, gp)
     if gp then return end
     
     if input.KeyCode == Enum.KeyCode.U then
-        if VisualizeHitboxToggle then
+        if HitboxEnabled then
             VisualizeHitbox = not VisualizeHitbox
             UpdateAllHitboxes()
             Notifier.new({Title = "Hitbox Visuals", Content = VisualizeHitbox and "ON" or "OFF", Duration = 2})
+        else
+            Notifier.new({Title = "Hitbox Visuals", Content = "Enable Hitbox Expander first", Duration = 2})
         end
     elseif input.KeyCode == Enum.KeyCode.Equals or input.KeyCode == Enum.KeyCode.Plus then
         if HitboxEnabled then
@@ -1520,6 +1579,7 @@ UserInputService.InputBegan:Connect(function(input, gp)
             if not newDesync then
                 getgenv().Desync.AutoAvoidActive = false
             end
+            SetDesyncToggle(newDesync)
             Notifier.new({Title = "Desync", Content = newDesync and "ON" or "OFF", Duration = 2})
         end
     elseif input.KeyCode == Enum.KeyCode.K then
@@ -1620,8 +1680,8 @@ local GunDropHighlightToggle = VisualsGunSection:AddToggle({
         if not v then
             for _,o in ipairs(Workspace:GetDescendants()) do
                 if o.Name=="GunDrop" then
-                    if o:FindFirstChild("GunDropHighlight") then o.GunDropHighlight:Destroy() end
-                    if o:FindFirstChild("GunDropLabel") then o.GunDropLabel:Destroy() end
+                    if o:FindFirstChild("GunDropHighlight") then pcall(function() o.GunDropHighlight:Destroy() end) end
+                    if o:FindFirstChild("GunDropLabel") then pcall(function() o.GunDropLabel:Destroy() end) end
                 end
             end
         end
@@ -1634,7 +1694,7 @@ local GunTracerToggle = VisualsGunSection:AddToggle({
     Default = true,
     Callback = function(v)
         GunTracerEnabled = v
-        if not v and CurrentGunTracer then CurrentGunTracer:Destroy() CurrentGunTracer = nil end
+        if not v and CurrentGunTracer then pcall(function() CurrentGunTracer:Destroy() end) CurrentGunTracer = nil end
     end
 })
 
@@ -1810,7 +1870,7 @@ local MurdererRageSection = MurdererTab:DrawSection({
     Position = 'left'
 })
 
-local KillAuraToggle = MurdererRageSection:AddToggle({
+KillAuraToggle = MurdererRageSection:AddToggle({
     Name = "Enable Kill Aura",
     Flag = "KillAura_Enabled",
     Default = false,
@@ -1946,11 +2006,13 @@ local DesyncKeybind = ExploitDesyncSection:AddKeybind({
     Default = "Z",
     Flag = "Desync_Keybind",
     Callback = function()
-        local newValue = not getgenv().Desync.Enabled
-        getgenv().Desync.Enabled = newValue
-        if not newValue then getgenv().Desync.AutoAvoidActive = false end
-        SetDesyncToggle(newValue)
-        Notifier.new({Title = "Desync", Content = newValue and "ON" or "OFF", Duration = 2})
+        if getgenv().Desync.Enabled then
+            local newValue = not getgenv().Desync.Enabled
+            getgenv().Desync.Enabled = newValue
+            if not newValue then getgenv().Desync.AutoAvoidActive = false end
+            SetDesyncToggle(newValue)
+            Notifier.new({Title = "Desync", Content = newValue and "ON" or "OFF", Duration = 2})
+        end
     end,
 })
 
@@ -2304,6 +2366,6 @@ ConfigManager:LoadConfig("AnnieConfig")
 
 Notifier.new({
     Title = "I Love Annie - MM2",
-    Content = "Script loaded! Press P to toggle UI | K for Kill All",
+    Content = "I LOVE MY BABYl",
     Duration = 5
 })
