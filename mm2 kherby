@@ -53,6 +53,12 @@ local mouse = LocalPlayer:GetMouse()
 
 -- Global State Management --
 local State = {
+    -- Speed Boost
+    SpeedBoost = { 
+        Enabled = false,
+        Speed = 32,
+        Key = "LeftShift"
+    },
     -- Feature toggles
     ESP = { Enabled = false, NameTags = true, FillTransparency = 0.4 },
     Aimbot = { 
@@ -84,6 +90,29 @@ local State = {
 -- Define toggle functions EARLY
 SetAimbotToggle = function(value) end
 SetDesyncToggle = function(value) end
+
+-- Speed Boost Function
+local function handleSpeedBoost()
+    local character = LocalPlayer.Character
+    if not character then return end
+    
+    local humanoid = character:FindFirstChildWhichIsA("Humanoid")
+    if not humanoid then return end
+    
+    if State.SpeedBoost.Enabled then
+        -- Check if shift is being held
+        if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) or UserInputService:IsKeyDown(Enum.KeyCode.RightShift) then
+            humanoid.WalkSpeed = State.SpeedBoost.Speed
+        else
+            humanoid.WalkSpeed = 16 -- Reset to normal speed
+        end
+    else
+        -- Ensure speed is normal when boost is disabled
+        if humanoid.WalkSpeed ~= 16 then
+            humanoid.WalkSpeed = 16
+        end
+    end
+end
 
 -- Desync Setup
 if not getgenv().FPDH then getgenv().FPDH = workspace.FallenPartsDestroyHeight end
@@ -1356,6 +1385,9 @@ task.spawn(function()
     end
 end)
 
+-- Add speed boost to render step
+RunService.RenderStepped:Connect(handleSpeedBoost)
+
 -- Event handlers
 Workspace.ChildAdded:Connect(function(child)
     if child and State.Gun.ESP and child:IsA("Tool") and child.Name == "Gun" then
@@ -1670,6 +1702,31 @@ MurdererHitboxSection:AddSlider({
     Name = "Hitbox Size",
     Min = 5, Max = 50, Default = 10, Round = 0, Flag = "Hitbox_Size",
     Callback = function(v) State.Hitbox.Size = v; if State.Hitbox.Enabled then UpdateAllHitboxes() end end
+})
+
+-- Player Tab (NEW SECTION FOR SPEED BOOST)
+local PlayerTab = Window:DrawTab({ Name = "Player", Icon = "user", EnableScrolling = true })
+local PlayerMovementSection = PlayerTab:DrawSection({ Name = "Movement", Position = 'left' })
+
+PlayerMovementSection:AddToggle({
+    Name = "Enable Speed Boost (Hold Shift)",
+    Flag = "SpeedBoost_Enabled",
+    Default = false,
+    Callback = function(v) 
+        State.SpeedBoost.Enabled = v
+        Notifier.new({Title="Speed Boost", Content=v and "Enabled - Hold Shift to run faster" or "Disabled", Duration=2})
+    end,
+})
+
+PlayerMovementSection:AddSlider({
+    Name = "Speed Boost Amount",
+    Min = 16, Max = 100, Default = 32, Round = 0, Flag = "SpeedBoost_Amount",
+    Callback = function(v) State.SpeedBoost.Speed = v end
+})
+
+PlayerMovementSection:AddParagraph({ 
+    Title = "Info", 
+    Content = "Hold Left Shift or Right Shift to activate speed boost when enabled." 
 })
 
 -- Exploit Tab
