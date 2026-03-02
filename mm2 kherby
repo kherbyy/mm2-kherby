@@ -56,7 +56,7 @@ local State = {
     -- Speed Boost
     SpeedBoost = { 
         Enabled = false,
-        Speed = 32,
+        Speed = 19, -- Changed to 19 (about 18% faster than base 16)
         Key = "LeftShift"
     },
     -- Feature toggles
@@ -1720,13 +1720,13 @@ PlayerMovementSection:AddToggle({
 
 PlayerMovementSection:AddSlider({
     Name = "Speed Boost Amount",
-    Min = 16, Max = 100, Default = 32, Round = 0, Flag = "SpeedBoost_Amount",
+    Min = 16, Max = 100, Default = 19, Round = 0, Flag = "SpeedBoost_Amount", -- Changed to 19 (≈18% boost)
     Callback = function(v) State.SpeedBoost.Speed = v end
 })
 
 PlayerMovementSection:AddParagraph({ 
     Title = "Info", 
-    Content = "Hold Left Shift or Right Shift to activate speed boost when enabled." 
+    Content = "Hold Left Shift or Right Shift to activate speed boost when enabled. Default 19 speed (≈18% faster than normal 16)." 
 })
 
 -- Exploit Tab
