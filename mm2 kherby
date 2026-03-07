@@ -53,26 +53,29 @@ local mouse = LocalPlayer:GetMouse()
 
 -- Global State Management --
 local State = {
-    -- Speed Boost
-    SpeedBoost = { 
-        Enabled = false,
-        Speed = 19, -- Changed to 19 (about 18% faster than base 16)
-        Key = "LeftShift"
-    },
-    -- Feature toggles
+    SpeedBoost = { Enabled = false, Speed = 19 },
     ESP = { Enabled = false, NameTags = true, FillTransparency = 0.4 },
     Aimbot = { 
-        featureEnabled = false,
-        active = false,
-        Sticky = false, 
-        Prediction = true, 
-        PredictionAmount = 0.168, 
-        Smoothness = 0.42, 
-        FOV = 220, 
-        OnlyMurderer = false, 
+        featureEnabled = false, active = false, Sticky = false, 
+        Prediction = true, PredictionAmount = 0.168, 
+        Smoothness = 0.42, FOV = 220, OnlyMurderer = false, 
         TargetPart = "Head" 
     },
-    SilentAim = { Enabled = false, OnlyOnShift = false, Part = "Head", Prediction = true, Amount = 0.168 },
+    SilentAim = { 
+        Enabled = false, 
+        OnlyOnShift = false, 
+        Part = "Head", 
+        Prediction = true, 
+        Amount = 0.168,
+        -- Vertical Dampener Settings (merged into Silent Aim)
+        VerticalDampener = {
+            Enabled = true,
+            JumpThreshold = 5,
+            VerticalReduction = 65, -- percentage
+            UseTorsoInAir = true,
+            AirbornePart = "UpperTorso"
+        }
+    },
     Triggerbot = { Enabled = false },
     KillAura = { Enabled = false, Range = 25 },
     Hitbox = { Enabled = false, Size = 10, Visualize = false },
@@ -80,14 +83,11 @@ local State = {
     AntiFling = { Enabled = false },
     Gun = { ESP = true, DropHighlight = true, Tracer = true, AutoTP = false },
     Teleport = { LastGunPos = nil },
-    Desync = { 
-        featureEnabled = false,
-        active = false
-    },
+    Desync = { featureEnabled = false, active = false },
     Fling = { isActive = false, currentTarget = nil }
 }
 
--- Define toggle functions EARLY
+-- Define toggle functions
 SetAimbotToggle = function(value) end
 SetDesyncToggle = function(value) end
 
@@ -95,22 +95,16 @@ SetDesyncToggle = function(value) end
 local function handleSpeedBoost()
     local character = LocalPlayer.Character
     if not character then return end
-    
     local humanoid = character:FindFirstChildWhichIsA("Humanoid")
     if not humanoid then return end
-    
     if State.SpeedBoost.Enabled then
-        -- Check if shift is being held
         if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) or UserInputService:IsKeyDown(Enum.KeyCode.RightShift) then
             humanoid.WalkSpeed = State.SpeedBoost.Speed
         else
-            humanoid.WalkSpeed = 16 -- Reset to normal speed
-        end
-    else
-        -- Ensure speed is normal when boost is disabled
-        if humanoid.WalkSpeed ~= 16 then
             humanoid.WalkSpeed = 16
         end
+    else
+        if humanoid.WalkSpeed ~= 16 then humanoid.WalkSpeed = 16 end
     end
 end
 
@@ -118,21 +112,11 @@ end
 if not getgenv().FPDH then getgenv().FPDH = workspace.FallenPartsDestroyHeight end
 
 getgenv().Desync = {
-    Enabled = false,
-    Method = "Sky",
-    OscillateDistance = 50,
-    OscillateSpeed = 5,
-    SpinSpeed = 20,
-    RandomDistance = 100,
-    ReturnToPosition = true,
-    AutoDesyncOnDamage = false,
-    HealthThreshold = 99,
-    LastHealth = 100,
-    Cooldown = 1,
-    LastTriggered = 0,
-    AutoAvoidMurderer = false,
-    AvoidDistance = 20,
-    AutoAvoidActive = false
+    Enabled = false, Method = "Sky", OscillateDistance = 50, OscillateSpeed = 5,
+    SpinSpeed = 20, RandomDistance = 100, ReturnToPosition = true,
+    AutoDesyncOnDamage = false, HealthThreshold = 99, LastHealth = 100,
+    Cooldown = 1, LastTriggered = 0, AutoAvoidMurderer = false,
+    AvoidDistance = 20, AutoAvoidActive = false
 }
 
 local DesyncData = { OriginalCFrame = CFrame.new(), StartTime = tick() }
@@ -541,27 +525,22 @@ local function ResetHitboxes()
     end
 end
 
--- ============= IY ANTI-FLING (SIMPLE & EFFECTIVE) =============
+-- Anti-Fling
 local antiFlingConnection = nil
 
 local function setupAntiFling()
-    -- Disconnect existing if any
     if antiFlingConnection then
         antiFlingConnection:Disconnect()
         antiFlingConnection = nil
     end
     
-    -- Create new anti-fling connection
     antiFlingConnection = RunService.Stepped:Connect(function()
         if not State.AntiFling.Enabled then return end
         
-        -- For every player except yourself
         for _, player in pairs(Players:GetPlayers()) do
             if player ~= LocalPlayer and player.Character then
-                -- Loop through ALL parts in their character
                 for _, part in pairs(player.Character:GetDescendants()) do
                     if part:IsA("BasePart") then
-                        -- Disable collision so they can't grab you
                         part.CanCollide = false
                     end
                 end
@@ -851,7 +830,7 @@ local function PerformKillAll()
     Notifier.new({Title="Kill All", Content="Killed "..count.." players", Duration=4})
 end
 
--- Silent Aim
+-- Silent Aim with Vertical Prediction Dampener (merged)
 local silentAimEnabled = false
 local aimOnlyWhenHolding = false
 local aimPart = "Head"
@@ -859,22 +838,67 @@ local predictionEnabled = true
 local predictionAmount = 0.168
 local originalGetTarget = nil
 
+-- Function to detect if a player is jumping/airborne
+local function isPlayerJumping(plr)
+    if not plr or not plr.Character then return false end
+    
+    local hrp = plr.Character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return false end
+    
+    local humanoid = plr.Character:FindFirstChildOfClass("Humanoid")
+    if not humanoid then return false end
+    
+    local isInAir = (humanoid.FloorMaterial == Enum.Material.Air)
+    local hasUpwardVelocity = hrp.Velocity.Y > State.SilentAim.VerticalDampener.JumpThreshold
+    
+    return isInAir or hasUpwardVelocity
+end
+
+-- Enhanced silent aim target position with vertical dampening
 local function getMurdererTargetPosition()
     for _, plr in ipairs(Players:GetPlayers()) do
         if plr ~= LocalPlayer and isAlive(plr) and isMurderer(plr) then
             local character = plr.Character
             if character then
-                local targetPart = character:FindFirstChild(aimPart) or character:FindFirstChild("Head") or character:FindFirstChild("HumanoidRootPart")
-                if targetPart then
-                    local targetPos = targetPart.Position
-                    if predictionEnabled then
-                        local hrp = character:FindFirstChild("HumanoidRootPart")
-                        if hrp and hrp.Velocity and hrp.Velocity.Magnitude > 3 then
-                            targetPos = targetPos + (hrp.Velocity * predictionAmount)
-                        end
-                    end
-                    return targetPos
+                -- Check if target is jumping
+                local isAirborne = isPlayerJumping(plr)
+                
+                -- Determine which part to aim at
+                local targetPartName = aimPart
+                if isAirborne and State.SilentAim.VerticalDampener.UseTorsoInAir and State.SilentAim.VerticalDampener.Enabled then
+                    targetPartName = State.SilentAim.VerticalDampener.AirbornePart
                 end
+                
+                -- Find the target part
+                local targetPart = character:FindFirstChild(targetPartName) or 
+                                 character:FindFirstChild("Head") or 
+                                 character:FindFirstChild("HumanoidRootPart")
+                if not targetPart then return nil end
+                
+                -- Get base position
+                local targetPos = targetPart.Position
+                
+                -- Apply prediction with vertical dampening if enabled
+                if predictionEnabled then
+                    local hrp = character:FindFirstChild("HumanoidRootPart")
+                    if hrp and hrp.Velocity then
+                        local velocity = hrp.Velocity
+                        
+                        -- Apply vertical dampening if player is jumping and dampener is enabled
+                        if isAirborne and State.SilentAim.VerticalDampener.Enabled then
+                            local reduction = State.SilentAim.VerticalDampener.VerticalReduction / 100
+                            velocity = Vector3.new(
+                                velocity.X,
+                                velocity.Y * reduction,
+                                velocity.Z
+                            )
+                        end
+                        
+                        targetPos = targetPos + (velocity * predictionAmount)
+                    end
+                end
+                
+                return targetPos
             end
         end
     end
@@ -885,15 +909,15 @@ local function setupSilentAim()
     local WeaponService = getWeaponService()
     if WeaponService and WeaponService.GetMouseTargetCFrame then
         originalGetTarget = WeaponService.GetMouseTargetCFrame
-        WeaponService.GetMouseTargetCFrame = function(self)
+        WeaponService.GetMouseTargetCFrame = function(self, ...)
             if silentAimEnabled then
                 if aimOnlyWhenHolding and not (UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) or UserInputService:IsKeyDown(Enum.KeyCode.RightShift)) then
-                    return originalGetTarget(self)
+                    return originalGetTarget(self, ...)
                 end
                 local targetPos = getMurdererTargetPosition()
                 if targetPos then return CFrame.new(targetPos) end
             end
-            return originalGetTarget(self)
+            return originalGetTarget(self, ...)
         end
         Notifier.new({Title="Silent Aim Ready", Content="WeaponService hooked successfully", Duration=2})
     end
@@ -1629,6 +1653,41 @@ SheriffSilentSection:AddSlider({
     Callback = function(v) predictionAmount = v end
 })
 
+-- Vertical Dampener Settings for Silent Aim (merged into Silent Aim section)
+SheriffSilentSection:AddToggle({
+    Name = "Enable Vertical Dampener",
+    Flag = "SilentVerticalDampener_Enabled",
+    Default = true,
+    Callback = function(v) State.SilentAim.VerticalDampener.Enabled = v end,
+})
+
+SheriffSilentSection:AddSlider({
+    Name = "Jump Detection Threshold",
+    Min = 1, Max = 20, Default = 5, Round = 1, Flag = "SilentJumpThreshold",
+    Callback = function(v) State.SilentAim.VerticalDampener.JumpThreshold = v end
+})
+
+SheriffSilentSection:AddSlider({
+    Name = "Vertical Reduction %",
+    Min = 0, Max = 100, Default = 65, Round = 0, Flag = "SilentVerticalReduction",
+    Callback = function(v) State.SilentAim.VerticalDampener.VerticalReduction = v end
+})
+
+SheriffSilentSection:AddToggle({
+    Name = "Switch to Torso in Air",
+    Flag = "SilentUseTorsoInAir",
+    Default = true,
+    Callback = function(v) State.SilentAim.VerticalDampener.UseTorsoInAir = v end
+})
+
+SheriffSilentSection:AddDropdown({
+    Name = "Airborne Target Part",
+    Default = "UpperTorso",
+    Flag = "SilentAirbornePart",
+    Values = {"UpperTorso", "HumanoidRootPart", "LowerTorso", "Head"},
+    Callback = function(v) State.SilentAim.VerticalDampener.AirbornePart = v end
+})
+
 local SheriffTriggerSection = SheriffTab:DrawSection({ Name = "Triggerbot", Position = 'left' })
 
 SheriffTriggerSection:AddToggle({
@@ -1704,7 +1763,7 @@ MurdererHitboxSection:AddSlider({
     Callback = function(v) State.Hitbox.Size = v; if State.Hitbox.Enabled then UpdateAllHitboxes() end end
 })
 
--- Player Tab (NEW SECTION FOR SPEED BOOST)
+-- Player Tab
 local PlayerTab = Window:DrawTab({ Name = "Player", Icon = "user", EnableScrolling = true })
 local PlayerMovementSection = PlayerTab:DrawSection({ Name = "Movement", Position = 'left' })
 
@@ -1720,7 +1779,7 @@ PlayerMovementSection:AddToggle({
 
 PlayerMovementSection:AddSlider({
     Name = "Speed Boost Amount",
-    Min = 16, Max = 100, Default = 19, Round = 0, Flag = "SpeedBoost_Amount", -- Changed to 19 (≈18% boost)
+    Min = 16, Max = 100, Default = 19, Round = 0, Flag = "SpeedBoost_Amount",
     Callback = function(v) State.SpeedBoost.Speed = v end
 })
 
