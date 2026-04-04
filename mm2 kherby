@@ -61,6 +61,14 @@ local State = {
         Smoothness = 0.42, FOV = 220, OnlyMurderer = false, 
         TargetPart = "Head" 
     },
+    FlickShoot = {
+        Enabled = false,
+        Speed = 0.1,
+        Prediction = true,
+        PredictionAmount = 0.168,
+        OnlyMurderer = true,
+        TargetPart = "Head"
+    },
     SilentAim = { 
         Enabled = false, 
         OnlyOnShift = false, 
@@ -184,7 +192,7 @@ end
 local function isInnocent(plr) 
     return plr ~= LocalPlayer and isAlive(plr) and not isMurderer(plr) and not isSheriff(plr) 
 end
-local function hasGun() return hasItem(LocalPlayer, "Gun") end
+local function hasGun() return hasItem(LocalPlayer, "Gun") or hasItem(LocalPlayer, "Revolver") end
 local function getCurrentMap()
     if State.MapCache and State.MapCache.Parent then return State.MapCache end
     for _, v in ipairs(Workspace:GetDescendants()) do
@@ -1024,6 +1032,80 @@ local function updateAimbot()
     end
 end
 
+-- FLICK SHOOT FEATURE --
+local flickShootActive = false
+local flickShootConnection = nil
+
+local function getFlickTarget()
+    if not State.FlickShoot.Enabled then return nil end
+    
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer and isAlive(plr) then
+            if State.FlickShoot.OnlyMurderer and not isMurderer(plr) then continue end
+            
+            local character = plr.Character
+            if character and character:FindFirstChild("Head") then
+                return plr
+            end
+        end
+    end
+    return nil
+end
+
+local function performFlickShoot()
+    local targetPlr = getFlickTarget()
+    if not targetPlr or not targetPlr.Character then
+        Notifier.new({Title="Flick Shoot", Content="No target found", Duration=2})
+        return
+    end
+    
+    local character = LocalPlayer.Character
+    if not character then return end
+    
+    local gun = character:FindFirstChild("Gun") or character:FindFirstChild("Revolver")
+    if not gun then
+        Notifier.new({Title="Flick Shoot", Content="No gun equipped", Duration=2})
+        return
+    end
+    
+    local targetPart = targetPlr.Character:FindFirstChild(State.FlickShoot.TargetPart) or 
+                       targetPlr.Character:FindFirstChild("Head")
+    if not targetPart then return end
+    
+    local targetPos = targetPart.Position
+    
+    -- Apply prediction
+    if State.FlickShoot.Prediction then
+        local hrp = targetPlr.Character:FindFirstChild("HumanoidRootPart")
+        if hrp and hrp.Velocity then
+            targetPos = targetPos + (hrp.Velocity * State.FlickShoot.PredictionAmount)
+        end
+    end
+    
+    -- Flick camera to target
+    local camera = Workspace.CurrentCamera
+    local startCFrame = camera.CFrame
+    local targetCFrame = CFrame.new(camera.CFrame.Position, targetPos)
+    
+    -- Smooth flick over the specified speed
+    local startTime = tick()
+    local duration = State.FlickShoot.Speed
+    
+    while (tick() - startTime) < duration do
+        local progress = (tick() - startTime) / duration
+        camera.CFrame = startCFrame:Lerp(targetCFrame, progress)
+        RunService.RenderStepped:Wait()
+    end
+    
+    camera.CFrame = targetCFrame
+    task.wait(0.05)
+    
+    -- Shoot
+    gun:Activate()
+    
+    Notifier.new({Title="Flick Shoot", Content="Shot "..targetPlr.Name, Duration=2})
+end
+
 RunService:BindToRenderStep("AnnieAimbotCamlock", Enum.RenderPriority.Camera.Value + 1, updateAimbot)
 
 -- Input handling
@@ -1064,6 +1146,12 @@ UserInputService.InputBegan:Connect(function(input, gp)
         end
         SetAimbotToggle(State.Aimbot.active)
         Notifier.new({Title="Aimbot", Content=State.Aimbot.active and "ACTIVE" or "INACTIVE", Duration=1.5})
+    elseif input.KeyCode == Enum.KeyCode.E then
+        if not State.FlickShoot.Enabled then
+            Notifier.new({Title="Flick Shoot", Content="Enable Flick Shoot in UI first", Duration=3})
+            return
+        end
+        performFlickShoot()
     elseif input.KeyCode == Enum.KeyCode.Z then
         if not State.Desync.featureEnabled then
             Notifier.new({Title="Desync", Content="Enable Desync in UI first", Duration=3})
@@ -1616,6 +1704,66 @@ SheriffCameraSection:AddKeybind({
     end,
 })
 
+-- FLICK SHOOT SECTION --
+local SheriffFlickSection = SheriffTab:DrawSection({ Name = "Flick Shoot", Position = 'left' })
+
+SheriffFlickSection:AddToggle({
+    Name = "Enable Flick Shoot",
+    Flag = "FlickShoot_Enabled",
+    Default = false,
+    Callback = function(v)
+        State.FlickShoot.Enabled = v
+        Notifier.new({Title="Flick Shoot", Content=v and "Enabled - Press E to flick shoot" or "Disabled", Duration=2})
+    end,
+})
+
+SheriffFlickSection:AddSlider({
+    Name = "Flick Speed (Lower = Faster)",
+    Min = 0.05, Max = 0.5, Default = 0.1, Round = 2, Flag = "FlickShoot_Speed",
+    Callback = function(v) State.FlickShoot.Speed = v end
+})
+
+SheriffFlickSection:AddToggle({
+    Name = "Enable Prediction",
+    Flag = "FlickShoot_Prediction",
+    Default = true,
+    Callback = function(v) State.FlickShoot.Prediction = v end
+})
+
+SheriffFlickSection:AddSlider({
+    Name = "Prediction Strength",
+    Min = 0, Max = 0.4, Default = 0.168, Round = 3, Flag = "FlickShoot_PredStrength",
+    Callback = function(v) State.FlickShoot.PredictionAmount = v end
+})
+
+SheriffFlickSection:AddToggle({
+    Name = "Target Murderer Only",
+    Flag = "FlickShoot_MurdererOnly",
+    Default = true,
+    Callback = function(v) State.FlickShoot.OnlyMurderer = v end
+})
+
+SheriffFlickSection:AddDropdown({
+    Name = "Aim Part",
+    Default = "Head",
+    Flag = "FlickShoot_Part",
+    Values = {"Head","UpperTorso","Torso","HumanoidRootPart","LowerTorso"},
+    Callback = function(v) State.FlickShoot.TargetPart = v end
+})
+
+SheriffFlickSection:AddKeybind({
+    Name = "Flick Shoot Keybind",
+    Default = "E",
+    Flag = "FlickShoot_Keybind",
+    Callback = function()
+        if not State.FlickShoot.Enabled then
+            Notifier.new({Title="Flick Shoot", Content="Enable Flick Shoot in UI first", Duration=3})
+            return
+        end
+        performFlickShoot()
+    end,
+})
+
 local SheriffSilentSection = SheriffTab:DrawSection({ Name = "Silent Aim", Position = 'left' })
 
 SheriffSilentSection:AddToggle({
@@ -2130,6 +2278,6 @@ ConfigManager:LoadConfig("AnnieConfig")
 -- Final notification
 Notifier.new({
     Title = "I Love Annie - MM2",
-    Content = "Script loaded! Press P for UI | Q toggles Aimbot | Z toggles Desync | K for Kill All",
+    Content = "Script loaded! Press P for UI | Q toggles Aimbot | E for Flick Shoot | Z toggles Desync | K for Kill All",
     Duration = 5
 })
