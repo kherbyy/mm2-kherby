@@ -26,6 +26,11 @@ local mouse = LocalPlayer:GetMouse()
 -- FULLY AUTOMATIC ADAPTIVE PREDICTION SYSTEM
 -- ============================================
 
+-- 💜 CUSTOM ESP COLORS 💜
+-- Girlfriend: K3TCHUPSS → Purple ESP (#C832FF)
+-- Your Username: KQRBYZ → Also shows purple on her screen
+-- This way you both see each other in purple!
+
 local PredictionSystem = {
     playerData = {},
     gravity = workspace.Gravity,
@@ -452,6 +457,17 @@ end
 
 local function getRoleColor(plr)
     if not plr or not plr.Character then return Color3.fromRGB(0, 255, 0) end
+    
+    -- 💜 CUSTOM PURPLE COLORS 💜
+    -- Both show purple to each other
+    if plr.Name == "K3TCHUPSS" then
+        return Color3.fromRGB(200, 50, 255)  -- Purple for girlfriend
+    end
+    
+    if plr.Name == "KQRBYZ" then
+        return Color3.fromRGB(200, 50, 255)  -- Purple for user (on her screen)
+    end
+    
     if isMurderer(plr) then return Color3.fromRGB(255, 0, 0) end
     if isSheriff(plr) then return Color3.fromRGB(0, 100, 255) end
     return Color3.fromRGB(0, 255, 0)
@@ -2366,6 +2382,7 @@ local ConfigUI = Window:DrawConfig({ Name = "Config", Icon = "folder", Config = 
 ConfigUI:Init()
 
 ConfigManager:LoadConfig("AnnieConfig")
+
 
 task.spawn(function()
     task.wait(0.75)  -- Wait for UI to fully load and render
