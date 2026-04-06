@@ -128,7 +128,12 @@ local function initPlayerData(player)
             movementType = "idle", -- idle, walking, sprinting, jumping
             lastValidPos = Vector3.new(),
             lastValidVel = Vector3.new(),
-            predictionCache = {},
+            averageAccel = Vector3.new(),
+            smoothedVelocity = Vector3.new(),
+            directionStability = 1,
+            movementConfidence = 1,
+            lastTargetPart = "HumanoidRootPart",
+            predictionCache = Vector3.new(),
             cacheTime = 0,
         }
     end
@@ -154,13 +159,13 @@ local function updatePlayerData(player, position, velocity)
     local currentTime = tick()
     local timeDelta = math.max(currentTime - data.lastUpdate, 0.01)
     
-    -- Store position
+    -- Store position samples for movement smoothing
     table.insert(data.positions, 1, {pos = position, time = currentTime})
     if #data.positions > PredictionSystem.maxSamples then
         table.remove(data.positions)
     end
     
-    -- Store velocity
+    -- Store velocity and preserve last valid vector
     local velMagnitude = velocity.Magnitude
     data.velocityMagnitude = velMagnitude
     data.lastValidVel = velocity
@@ -170,10 +175,14 @@ local function updatePlayerData(player, position, velocity)
         table.remove(data.velocities)
     end
     
-    -- Auto-calculate acceleration
+    data.smoothedVelocity = (data.smoothedVelocity * 0.72) + (velocity * 0.28)
+    
+    -- Auto-calculate acceleration from recent velocity changes
     local acceleration = Vector3.new()
     if #data.velocities > 1 then
-        acceleration = (velocity - data.velocities[2].vel) / timeDelta
+        local previousVelocity = data.velocities[2].vel
+        local elapsed = math.max(currentTime - data.velocities[2].time, 0.01)
+        acceleration = (velocity - previousVelocity) / elapsed
     end
     
     table.insert(data.accelerations, 1, {accel = acceleration, time = currentTime})
@@ -181,24 +190,44 @@ local function updatePlayerData(player, position, velocity)
         table.remove(data.accelerations)
     end
     
-    -- Auto-detect jump
-    if velocity.Y > 20 and data.groundState then
+    local accelSum = Vector3.new()
+    local accelCount = math.min(#data.accelerations, 4)
+    for i = 1, accelCount do
+        accelSum = accelSum + data.accelerations[i].accel
+    end
+    data.averageAccel = accelCount > 0 and (accelSum / accelCount) or Vector3.new()
+    
+    -- Auto-detect jump and ground state more consistently
+    if velocity.Y > 18 and data.groundState then
         data.jumpState = true
         data.jumpStartTime = currentTime
         data.groundState = false
-    elseif velocity.Y < 5 and not data.groundState then
+    elseif velocity.Y < 4 and not data.groundState then
         data.groundState = true
         data.jumpState = false
     end
     
-    -- Auto-detect movement type
+    -- Auto-detect movement type and direction
     data.movementType = detectMovementType(velocity, velMagnitude)
     data.isMoving = velMagnitude > 0.5
-    
     if data.isMoving then
         data.direction = velocity.Unit
     end
     
+    local stabilitySum = 0
+    local stabilityCount = 0
+    for i = 1, math.min(#data.velocities, 5) - 1 do
+        local v1 = data.velocities[i].vel
+        local v2 = data.velocities[i + 1].vel
+        if v1.Magnitude > 1 and v2.Magnitude > 1 then
+            stabilitySum = stabilitySum + math.clamp(v1.Unit:Dot(v2.Unit), -1, 1)
+            stabilityCount = stabilityCount + 1
+        end
+    end
+    data.directionStability = stabilityCount > 0 and (stabilitySum / stabilityCount) or 1
+    data.movementConfidence = math.clamp(0.55 + 0.45 * data.directionStability, 0.35, 1)
+    
+    data.lastValidPos = position
     data.lastUpdate = currentTime
 end
 
@@ -214,18 +243,27 @@ local BodyPartScores = {
 local function getAutoTargetPart(character, playerData)
     if not character then return "Head" end
     
-    local bestScore = -1
-    local bestPart = "Head"
+    local bestScore = -math.huge
+    local bestPart = playerData.lastTargetPart or "Head"
+    local preferRoot = playerData.movementType == "sprinting" or playerData.movementType == "jumping"
     
     for partName, baseScore in pairs(BodyPartScores) do
         local part = character:FindFirstChild(partName)
         if part then
-            -- Auto-adjust score based on velocity
-            local velocityFactor = 1 / (1 + playerData.velocityMagnitude * 0.05)
-            local sizeBonus = (part.Size.X + part.Size.Y + part.Size.Z) / 12
-            
-            local finalScore = (baseScore + sizeBonus) * velocityFactor
-            
+            local sizeBonus = (part.Size.X + part.Size.Y + part.Size.Z) / 14
+            local velocityFactor = 1 / (1 + playerData.velocityMagnitude * 0.035)
+            local motionBias = 1
+            if preferRoot then
+                motionBias = (partName == "HumanoidRootPart") and 1.22 or ((partName == "Torso") and 1.05 or 0.94)
+            elseif partName == "Head" then
+                motionBias = 1.08
+            end
+
+            local finalScore = (baseScore + sizeBonus) * velocityFactor * motionBias
+            if playerData.directionStability < 0.7 and partName == "HumanoidRootPart" then
+                finalScore = finalScore * 1.06
+            end
+
             if finalScore > bestScore then
                 bestScore = finalScore
                 bestPart = partName
@@ -233,39 +271,35 @@ local function getAutoTargetPart(character, playerData)
         end
     end
     
+    playerData.lastTargetPart = bestPart
     return bestPart
 end
 
 -- Fully automatic prediction (no parameters needed)
 local function predictPlayerPosition(player, targetPart)
-    if not player or not player.Character or not targetPart then
+    if not player or not player.Character then
         return targetPart and targetPart.Position or Vector3.new()
     end
     
     local character = player.Character
     local hrp = character:FindFirstChild("HumanoidRootPart")
-    
-    if not hrp then 
-        return targetPart.Position 
+    if not hrp then
+        return targetPart and targetPart.Position or Vector3.new()
     end
     
-    -- Update metrics automatically
+    -- Update metrics and motion history automatically
     updateNetworkMetrics()
-    
-    -- Update player data automatically
     updatePlayerData(player, hrp.Position, hrp.Velocity)
     local data = initPlayerData(player)
     
-    -- Auto-select best body part
+    -- Auto-select body part and use the most reliable position
     local finalTargetPart = getAutoTargetPart(character, data)
-    local targetPos = character:FindFirstChild(finalTargetPart) or targetPart
-    targetPos = targetPos and targetPos.Position or targetPart.Position
-    
-    local currentPos = targetPos
+    local chosenPart = character:FindFirstChild(finalTargetPart) or targetPart or hrp
+    local currentPos = chosenPart.Position
     local currentVel = data.lastValidVel
     
-    -- Auto-calculate prediction time based on movement type
-    local basePredictionTime = 0.15
+    -- Base prediction time depends on movement and latency
+    local basePredictionTime = 0.12
     if data.movementType == "idle" then
         basePredictionTime = 0.08
     elseif data.movementType == "walking" then
@@ -273,37 +307,54 @@ local function predictPlayerPosition(player, targetPart)
     elseif data.movementType == "sprinting" then
         basePredictionTime = 0.16
     elseif data.movementType == "jumping" then
-        basePredictionTime = 0.18
+        basePredictionTime = 0.20
     end
     
-    -- Auto-add network compensation
-    local totalPredictionTime = basePredictionTime + NetworkMetrics.RTTBuffer
+    local jitterCompensation = math.clamp(NetworkMetrics.jitter / 500, 0, 0.05)
+    local speedCompensation = math.clamp(data.velocityMagnitude / 34, 0, 0.06)
+    local confidenceModifier = 0.75 + (data.movementConfidence * 0.25)
+    local totalPredictionTime = math.clamp((basePredictionTime + NetworkMetrics.RTTBuffer + jitterCompensation + speedCompensation) * confidenceModifier, 0.06, 0.30)
     
-    -- Separate horizontal and vertical
-    local horizontalVel = Vector3.new(currentVel.X, 0, currentVel.Z)
-    local verticalVel = currentVel.Y
-    
-    -- Predict position
-    local predictedPos = currentPos + (horizontalVel * totalPredictionTime)
-    
-    -- Auto-apply gravity
-    if not data.groundState or data.jumpState then
-        local gravityOffset = 0.5 * PredictionSystem.gravity * totalPredictionTime * totalPredictionTime
-        predictedPos = predictedPos - Vector3.new(0, gravityOffset, 0)
-        predictedPos = predictedPos + Vector3.new(0, verticalVel * totalPredictionTime, 0)
+    local effectiveVelocity = currentVel
+    if effectiveVelocity.Magnitude < 0.5 and data.direction.Magnitude > 0 then
+        effectiveVelocity = data.direction * math.max(data.velocityMagnitude, 1)
+    end
+    if effectiveVelocity.Magnitude > 5 and data.directionStability > 0.78 then
+        effectiveVelocity = effectiveVelocity:Lerp(data.smoothedVelocity, 0.18)
     end
     
-    -- Auto-smooth with historical positions
+    local horizVel = Vector3.new(effectiveVelocity.X, 0, effectiveVelocity.Z)
+    local horizAccel = Vector3.new(data.averageAccel.X, 0, data.averageAccel.Z)
+    local horizontalPrediction = currentPos + horizVel * totalPredictionTime + 0.5 * horizAccel * totalPredictionTime * totalPredictionTime
+    
+    local predictedY = currentPos.Y
+    if not data.groundState or data.jumpState or math.abs(currentVel.Y) > 4 then
+        local verticalAccel = data.averageAccel.Y - PredictionSystem.gravity
+        predictedY = currentPos.Y + effectiveVelocity.Y * totalPredictionTime + 0.5 * verticalAccel * totalPredictionTime * totalPredictionTime
+    end
+    
+    local predictedPos = Vector3.new(horizontalPrediction.X, predictedY, horizontalPrediction.Z)
+    
+    -- Adapt to inconsistent movement by reducing overshoot
+    if data.directionStability < 0.7 then
+        local stabilityFactor = math.clamp(data.directionStability * 0.8 + 0.2, 0.2, 1)
+        predictedPos = currentPos:Lerp(predictedPos, stabilityFactor)
+    end
+    
+    -- Clamp extreme jumps and smooth abrupt changes
     if #data.positions >= 2 then
-        local oldPos = data.positions[2].pos
-        local posChange = (predictedPos - oldPos).Magnitude
-        
-        if posChange > 200 then
-            local direction = (predictedPos - oldPos).Unit
-            predictedPos = oldPos + direction * 200
+        local previousPos = data.positions[2].pos
+        local maxDelta = 200
+        if (predictedPos - previousPos).Magnitude > maxDelta then
+            predictedPos = previousPos + (predictedPos - previousPos).Unit * maxDelta
         end
     end
+    if tick() - data.cacheTime < 0.12 and data.predictionCache then
+        predictedPos = data.predictionCache:Lerp(predictedPos, 0.22)
+    end
     
+    data.predictionCache = predictedPos
+    data.cacheTime = tick()
     return predictedPos
 end
 
