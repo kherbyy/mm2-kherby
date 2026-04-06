@@ -510,7 +510,17 @@ local function CreateESP(char, plr)
             txt.Size = UDim2.new(1,0,1,0)
             txt.BackgroundTransparency = 0.35
             txt.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-            txt.Text = plr.Name
+            
+            -- 💜 CUSTOM NAME TAGS 💜
+            -- Show "MY GIRLFRIEND" or "MY BOYFRIEND" instead of username
+            local displayName = plr.Name
+            if plr.Name == "K3TCHUPSS" then
+                displayName = "MY GIRLFRIEND"
+            elseif plr.Name == "KQRBYZ" then
+                displayName = "MY BOYFRIEND"
+            end
+            
+            txt.Text = displayName
             txt.TextColor3 = getRoleColor(plr)
             txt.TextScaled = true
             txt.Font = Enum.Font.GothamBold
