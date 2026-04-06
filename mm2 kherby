@@ -3,6 +3,7 @@
 -- 1. Theme dropdown default changed from "Default" to "Dark Blue"
 -- 2. Added automatic theme initialization on script load (task.spawn with 0.5s delay)
 -- 3. Added notification confirming Dark Blue theme was applied
+-- 4. FIXED: ESP colors and name tags are now bidirectional (both see purple and custom names)
 
 local Compkiller = loadstring(game:HttpGet("https://raw.githubusercontent.com/4lpaca-pin/CompKiller/refs/heads/main/src/source.luau"))();
 
@@ -26,10 +27,10 @@ local mouse = LocalPlayer:GetMouse()
 -- FULLY AUTOMATIC ADAPTIVE PREDICTION SYSTEM
 -- ============================================
 
--- 💜 CUSTOM ESP COLORS 💜
+-- 💜 CUSTOM ESP COLORS - BIDIRECTIONAL 💜
 -- Girlfriend: K3TCHUPSS → Purple ESP (#C832FF)
--- Your Username: KQRBYZ → Also shows purple on her screen
--- This way you both see each other in purple!
+-- Boyfriend: KQRBYZ → Purple ESP (#C832FF)
+-- Both see each other in purple!
 
 local PredictionSystem = {
     playerData = {},
@@ -458,19 +459,31 @@ end
 local function getRoleColor(plr)
     if not plr or not plr.Character then return Color3.fromRGB(0, 255, 0) end
     
-    -- 💜 CUSTOM PURPLE COLORS 💜
-    -- Both show purple to each other
-    if plr.Name == "K3TCHUPSS" then
-        return Color3.fromRGB(200, 50, 255)  -- Purple for girlfriend
+    -- 💜 CUSTOM PURPLE COLORS - BIDIRECTIONAL 💜
+    -- KQRBYZ (boyfriend) shows purple
+    if plr.Name == "KQRBYZ" then
+        return Color3.fromRGB(200, 50, 255)  -- Purple
     end
     
-    if plr.Name == "KQRBYZ" then
-        return Color3.fromRGB(200, 50, 255)  -- Purple for user (on her screen)
+    -- K3TCHUPSS (girlfriend) shows purple
+    if plr.Name == "K3TCHUPSS" then
+        return Color3.fromRGB(200, 50, 255)  -- Purple
     end
     
     if isMurderer(plr) then return Color3.fromRGB(255, 0, 0) end
     if isSheriff(plr) then return Color3.fromRGB(0, 100, 255) end
     return Color3.fromRGB(0, 255, 0)
+end
+
+local function getDisplayName(plr)
+    -- 💜 CUSTOM NAME TAGS - BIDIRECTIONAL 💜
+    if plr.Name == "KQRBYZ" then
+        return "MY BOYFRIEND"
+    elseif plr.Name == "K3TCHUPSS" then
+        return "MY GIRLFRIEND"
+    else
+        return plr.Name
+    end
 end
 
 local function CleanupESP(char)
@@ -511,16 +524,7 @@ local function CreateESP(char, plr)
             txt.BackgroundTransparency = 0.35
             txt.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
             
-            -- 💜 CUSTOM NAME TAGS 💜
-            -- Show "MY GIRLFRIEND" or "MY BOYFRIEND" instead of username
-            local displayName = plr.Name
-            if plr.Name == "K3TCHUPSS" then
-                displayName = "MY GIRLFRIEND"
-            elseif plr.Name == "KQRBYZ" then
-                displayName = "MY BOYFRIEND"
-            end
-            
-            txt.Text = displayName
+            txt.Text = getDisplayName(plr)
             txt.TextColor3 = getRoleColor(plr)
             txt.TextScaled = true
             txt.Font = Enum.Font.GothamBold
