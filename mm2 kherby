@@ -2166,7 +2166,7 @@ VisualsGunSection:AddToggle({
 })
 
 local SheriffTab = Window:DrawTab({ Name = "Sheriff", Icon = "target", EnableScrolling = true })
-local SheriffCameraSection = SheriffTab:DrawSection({ Name = "Camera Aimbot (EINSTEIN PREDICTION)", Position = 'left' })
+local SheriffCameraSection = SheriffTab:DrawSection({ Name = "Camera Aimbot", Position = 'left' })
 
 AimbotToggle = SheriffCameraSection:AddToggle({
     Name = "Enable Aimbot Feature",
@@ -2217,7 +2217,7 @@ SheriffCameraSection:AddKeybind({
     Callback = function(v) State.Aimbot.Keybind = v end,
 })
 
-local SheriffFlickSection = SheriffTab:DrawSection({ Name = "Flick Shoot (EINSTEIN PREDICTION)", Position = 'left' })
+local SheriffFlickSection = SheriffTab:DrawSection({ Name = "Flick Shoot", Position = 'left' })
 
 SheriffFlickSection:AddToggle({
     Name = "Enable Flick Shoot",
@@ -2243,7 +2243,7 @@ SheriffFlickSection:AddKeybind({
     Callback = function(v) State.FlickShoot.Keybind = v end,
 })
 
-local SheriffSilentSection = SheriffTab:DrawSection({ Name = "Silent Aim (EINSTEIN PREDICTION)", Position = 'left' })
+local SheriffSilentSection = SheriffTab:DrawSection({ Name = "Silent Aim", Position = 'left' })
 
 SheriffSilentSection:AddToggle({
     Name = "Enable Silent Aim",
