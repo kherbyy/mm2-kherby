@@ -741,13 +741,19 @@ local function getCurrentMap()
     return nil
 end
 
+-- ============================================
+-- FIXED: CUSTOM COLORS & NAMETAGS FOR HER SCREEN
+-- ============================================
+
 local function getRoleColor(plr)
     if not plr or not plr.Character then return Color3.fromRGB(0, 255, 0) end
     
-    if plr.Name == "KQRBYZ" then
-        return Color3.fromRGB(200, 50, 255)
+    -- FOR HER SCREEN - kqrbyz appears PURPLE 💜
+    if string.lower(plr.Name) == "kqrbyz" then
+        return Color3.fromRGB(200, 50, 255)  -- Purple for boyfriend
     end
     
+    -- FOR HER SCREEN - K3TCHUPSS appears PURPLE
     if plr.Name == "K3TCHUPSS" then
         return Color3.fromRGB(200, 50, 255)
     end
@@ -758,7 +764,8 @@ local function getRoleColor(plr)
 end
 
 local function getDisplayName(plr)
-    if plr.Name == "KQRBYZ" then
+    -- FOR HER SCREEN - kqrbyz shows as "MY BOYFRIEND"
+    if string.lower(plr.Name) == "kqrbyz" then
         return "MY BOYFRIEND"
     elseif plr.Name == "K3TCHUPSS" then
         return "MY GIRLFRIEND"
@@ -841,6 +848,7 @@ local function UpdateAllESPColors()
             if tag and tag:FindFirstChild("TextLabel") then
                 local newColor = getRoleColor(plr)
                 tag.TextLabel.TextColor3 = newColor
+                tag.TextLabel.Text = getDisplayName(plr)
             end
         end
     end
