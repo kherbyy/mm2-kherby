@@ -2040,7 +2040,7 @@ SheriffSilentSection:AddToggle({
     Callback = function(v) aimOnlyWhenHolding = v end,
 })
 
-local SheriffSilentHackerSection = SheriffTab:DrawSection({ Name = "Silent Hacker", Position = 'left' })
+local SheriffSilentHackerSection = SheriffTab:DrawSection({ Name = "(enable silent aim first)", Position = 'left' })
 
 local SilentHackerToggle = SheriffSilentHackerSection:AddToggle({
     Name = "Enable Silent Hacker",
