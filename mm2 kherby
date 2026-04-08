@@ -1,8 +1,3 @@
--- ============================================
--- MM2 ENHANCED PREDICTION SYSTEM v2.0
--- ACCURATE PHYSICS-BASED PREDICTION
--- ============================================
-
 local Compkiller = loadstring(game:HttpGet("https://raw.githubusercontent.com/4lpaca-pin/CompKiller/refs/heads/main/src/source.luau"))();
 
 local Notifier = Compkiller.newNotify();
@@ -21,19 +16,9 @@ local Stats = game:GetService("Stats")
 local LocalPlayer = Players.LocalPlayer
 local mouse = LocalPlayer:GetMouse()
 
--- ============================================
--- ACCURATE PREDICTION SYSTEM
--- ============================================
-
 local PredictionSystem = {
     playerData = {},
     gravity = workspace.Gravity,
-    maxSamples = 60,
-    lastCalibration = 0,
-    calibrationInterval = 1,
-    airResistance = 0.02,
-    groundFriction = 0.15,
-    accelerationFactor = 1.0,
 }
 
 local NetworkMetrics = {
@@ -48,10 +33,6 @@ local NetworkMetrics = {
     packetLoss = 0,
     stability = 1.0,
 }
-
--- ============================================
--- NETWORK METRICS SYSTEM
--- ============================================
 
 local function getNetworkPing()
     local ping = 0
@@ -88,7 +69,7 @@ end
 
 local function updateNetworkMetrics()
     local currentTime = tick()
-    if currentTime - NetworkMetrics.lastUpdate < 0.03 then
+    if currentTime - NetworkMetrics.lastUpdate < 0.1 then
         return
     end
     
@@ -134,256 +115,19 @@ local function updateNetworkMetrics()
     NetworkMetrics.lastUpdate = currentTime
 end
 
--- ============================================
--- PLAYER DATA INITIALIZATION
--- ============================================
-
 local function initPlayerData(player)
     if not PredictionSystem.playerData[player] then
         PredictionSystem.playerData[player] = {
-            positions = {},
-            velocities = {},
-            accelerations = {},
+            lastPosition = Vector3.new(),
+            lastVelocity = Vector3.new(),
+            lastTime = tick(),
             positionHistory = {},
             velocityHistory = {},
-            accelerationHistory = {},
-            
-            lastUpdate = 0,
-            jumpState = false,
-            jumpStartTime = 0,
-            groundState = true,
-            velocityMagnitude = 0,
-            direction = Vector3.new(),
-            isMoving = false,
-            movementType = "idle",
-            lastValidPos = Vector3.new(),
-            lastValidVel = Vector3.new(),
-            lastValidAccel = Vector3.new(),
-            
-            smoothedVelocity = Vector3.new(),
-            smoothedAcceleration = Vector3.new(),
-            directionStability = 1,
-            speedStability = 1,
-            accelerationStability = 1,
-            movementConfidence = 1,
-            
-            lastSpeed = 0,
-            lastAccelMagnitude = 0,
-            velocityChangeRate = 0,
-            accelerationChangeRate = 0,
-            predictabilityScore = 0,
-            
-            lastTargetPart = "Head",
-            predictionCache = Vector3.new(),
-            cacheTime = 0,
-            cacheTTL = 0.08,
-            
-            directionHistory = {},
-            speedPatterns = {},
-            accelPatterns = {},
+            lastTargetPart = "UpperTorso",
         }
     end
     return PredictionSystem.playerData[player]
 end
-
--- ============================================
--- MOVEMENT TYPE DETECTION
--- ============================================
-
-local function detectMovementType(velocity, magnitude)
-    if magnitude < 0.5 then
-        return "idle", 0
-    elseif magnitude < 12 then
-        return "walking", magnitude / 16
-    elseif magnitude < 22 then
-        return "sprinting", magnitude / 28
-    elseif magnitude < 35 then
-        return "high_speed", magnitude / 40
-    else
-        return "jumping", math.min(magnitude / 50, 1)
-    end
-end
-
--- ============================================
--- PHYSICS-BASED ACCELERATION CALCULATION
--- ============================================
-
-local function calculatePhysicsAcceleration(velocity, targetVelocity, elapsedTime)
-    if elapsedTime < 0.001 then return Vector3.new() end
-    
-    local accelDue = (targetVelocity - velocity) / math.max(elapsedTime, 0.001)
-    
-    local horizontalAccel = Vector3.new(accelDue.X, 0, accelDue.Z)
-    local horizontalMag = horizontalAccel.Magnitude
-    
-    if horizontalMag > 20 then
-        horizontalAccel = (horizontalAccel.Unit * 20)
-    end
-    
-    local verticalAccel = accelDue.Y
-    
-    return Vector3.new(horizontalAccel.X, verticalAccel, horizontalAccel.Z)
-end
-
--- ============================================
--- PLAYER DATA UPDATE
--- ============================================
-
-local function updatePlayerData(player, position, velocity)
-    local data = initPlayerData(player)
-    local currentTime = tick()
-    local timeDelta = math.max(currentTime - data.lastUpdate, 0.01)
-    
-    table.insert(data.positionHistory, 1, {pos = position, time = currentTime})
-    if #data.positionHistory > PredictionSystem.maxSamples then
-        table.remove(data.positionHistory)
-    end
-    
-    local velMagnitude = velocity.Magnitude
-    data.velocityMagnitude = velMagnitude
-    data.lastValidVel = velocity
-    
-    table.insert(data.velocityHistory, 1, {vel = velocity, time = currentTime, mag = velMagnitude})
-    if #data.velocityHistory > PredictionSystem.maxSamples then
-        table.remove(data.velocityHistory)
-    end
-    
-    data.smoothedVelocity = data.smoothedVelocity:Lerp(velocity, 0.2)
-    
-    local acceleration = Vector3.new()
-    if #data.velocityHistory > 1 then
-        local previousVel = data.velocityHistory[2].vel
-        local elapsed = math.max(currentTime - data.velocityHistory[2].time, 0.001)
-        acceleration = calculatePhysicsAcceleration(previousVel, velocity, elapsed)
-    end
-    
-    data.lastValidAccel = acceleration
-    
-    table.insert(data.accelerationHistory, 1, {accel = acceleration, time = currentTime, mag = acceleration.Magnitude})
-    if #data.accelerationHistory > PredictionSystem.maxSamples then
-        table.remove(data.accelerationHistory)
-    end
-    
-    data.smoothedAcceleration = data.smoothedAcceleration:Lerp(acceleration, 0.15)
-    
-    if velocity.Y > 20 and data.groundState then
-        data.jumpState = true
-        data.jumpStartTime = currentTime
-        data.groundState = false
-    elseif velocity.Y < 2 and not data.groundState and (currentTime - data.jumpStartTime) > 0.1 then
-        data.groundState = true
-        data.jumpState = false
-    end
-    
-    data.movementType, _ = detectMovementType(velocity, velMagnitude)
-    data.isMoving = velMagnitude > 0.8
-    
-    if data.isMoving then
-        data.direction = velocity.Unit
-        table.insert(data.directionHistory, 1, data.direction)
-        if #data.directionHistory > PredictionSystem.maxSamples then
-            table.remove(data.directionHistory)
-        end
-    end
-    
-    local stabilitySum = 0
-    local stabilityCount = 0
-    for i = 1, math.min(#data.directionHistory, 6) - 1 do
-        local d1 = data.directionHistory[i]
-        local d2 = data.directionHistory[i + 1]
-        if d1.Magnitude > 0.5 and d2.Magnitude > 0.5 then
-            local dotProduct = math.clamp(d1:Dot(d2), -1, 1)
-            stabilitySum = stabilitySum + dotProduct
-            stabilityCount = stabilityCount + 1
-        end
-    end
-    data.directionStability = stabilityCount > 0 and (stabilitySum / stabilityCount * 0.5 + 0.5) or 1
-    
-    local speedDiff = math.abs(velMagnitude - data.lastSpeed)
-    data.speedStability = 1 - math.clamp(speedDiff / math.max(data.lastSpeed + 1, 2), 0, 1)
-    data.speedStability = math.clamp(data.speedStability * 0.7 + 0.3, 0.2, 1)
-    data.lastSpeed = velMagnitude
-    
-    local currentAccelMag = data.lastValidAccel.Magnitude
-    local accelDiff = math.abs(currentAccelMag - data.lastAccelMagnitude)
-    data.accelerationStability = 1 - math.clamp(accelDiff / math.max(data.lastAccelMagnitude + 0.5, 1), 0, 1)
-    data.accelerationStability = math.clamp(data.accelerationStability * 0.6 + 0.4, 0.2, 1)
-    data.lastAccelMagnitude = currentAccelMag
-    
-    local directionWeight = 0.5
-    local speedWeight = 0.3
-    local accelWeight = 0.2
-    data.predictabilityScore = math.clamp(
-        data.directionStability * directionWeight +
-        data.speedStability * speedWeight +
-        data.accelerationStability * accelWeight,
-        0.1, 1
-    )
-    
-    data.movementConfidence = 0.4 + (data.predictabilityScore * 0.6)
-    
-    data.lastValidPos = position
-    data.lastUpdate = currentTime
-end
-
--- ============================================
--- BODY PART SELECTION
--- ============================================
-
-local BodyPartScores = {
-    Head = 1.3,
-    UpperTorso = 1.15,
-    Torso = 1.0,
-    HumanoidRootPart = 0.85,
-    LowerTorso = 0.75,
-}
-
-local function getAutoTargetPart(character, playerData, movementType)
-    if not character then return "Head" end
-    
-    local bestScore = -math.huge
-    local bestPart = playerData.lastTargetPart or "Head"
-    
-    local targetStrategy = "Head"
-    if movementType == "jumping" or movementType == "high_speed" then
-        targetStrategy = "HumanoidRootPart"
-    elseif movementType == "sprinting" then
-        targetStrategy = "UpperTorso"
-    end
-    
-    for partName, baseScore in pairs(BodyPartScores) do
-        local part = character:FindFirstChild(partName)
-        if part then
-            local sizeBonus = (part.Size.X + part.Size.Y + part.Size.Z) / 15
-            
-            local velocityFactor = 1 / (1 + playerData.velocityMagnitude * 0.025)
-            
-            local strategyBonus = (partName == targetStrategy) and 1.15 or 1.0
-            
-            local predictBonus = 1 + (playerData.predictabilityScore * 0.15)
-            
-            if playerData.directionStability < 0.6 then
-                if partName == "Head" then
-                    baseScore = baseScore * 0.85
-                end
-            end
-            
-            local finalScore = (baseScore + sizeBonus) * velocityFactor * strategyBonus * predictBonus
-            
-            if finalScore > bestScore then
-                bestScore = finalScore
-                bestPart = partName
-            end
-        end
-    end
-    
-    playerData.lastTargetPart = bestPart
-    return bestPart
-end
-
--- ============================================
--- ACCURATE PREDICTION ENGINE
--- ============================================
 
 local function predictPlayerPosition(player, targetPart)
     if not player or not player.Character then
@@ -397,140 +141,45 @@ local function predictPlayerPosition(player, targetPart)
     end
     
     updateNetworkMetrics()
-    updatePlayerData(player, hrp.Position, hrp.Velocity)
+    
     local data = initPlayerData(player)
+    local currentTime = tick()
+    local timeDelta = currentTime - data.lastTime
     
-    local finalTargetPart = getAutoTargetPart(character, data, data.movementType)
-    local chosenPart = character:FindFirstChild(finalTargetPart) or targetPart or hrp
-    local currentPos = chosenPart.Position
-    local currentVel = data.lastValidVel
-    local currentAccel = data.lastValidAccel
+    local currentPos = hrp.Position
+    local currentVel = hrp.Velocity
     
-    -- ============================================
-    -- ACCURATE PREDICTION TIME
-    -- ============================================
-    
-    local basePredictionTime = 0
-    
-    local latencyCompensation = NetworkMetrics.RTTBuffer
-    
-    local jitterCompensation = math.clamp(NetworkMetrics.jitter / 800, 0, 0.03)
-    
-    local speedCompensation = math.clamp(data.velocityMagnitude / 100, 0, 0.02)
-    
-    if data.movementType == "idle" then
-        basePredictionTime = 0.03
-    elseif data.movementType == "walking" then
-        basePredictionTime = 0.05
-    elseif data.movementType == "sprinting" then
-        basePredictionTime = 0.07
-    elseif data.movementType == "high_speed" then
-        basePredictionTime = 0.09
-    elseif data.movementType == "jumping" then
-        basePredictionTime = 0.11
+    table.insert(data.positionHistory, 1, {pos = currentPos, time = currentTime})
+    if #data.positionHistory > 10 then
+        table.remove(data.positionHistory)
     end
     
-    local confidenceModifier = 0.85 + (data.movementConfidence * 0.15)
-    
-    local stabilityModifier = 0.95 + (NetworkMetrics.stability * 0.05)
-    
-    local totalPredictionTime = math.clamp(
-        basePredictionTime + latencyCompensation + jitterCompensation + speedCompensation,
-        0.02, 0.15
-    )
-    
-    -- ============================================
-    -- VELOCITY HANDLING
-    -- ============================================
-    
-    local effectiveVelocity = currentVel
-    
-    if effectiveVelocity.Magnitude < 0.5 then
-        return currentPos
+    table.insert(data.velocityHistory, 1, {vel = currentVel, time = currentTime})
+    if #data.velocityHistory > 10 then
+        table.remove(data.velocityHistory)
     end
     
-    local avgVel = Vector3.new()
-    local velCount = math.min(#data.velocityHistory, 3)
-    for i = 1, velCount do
-        avgVel = avgVel + data.velocityHistory[i].vel
+    data.lastPosition = currentPos
+    data.lastVelocity = currentVel
+    data.lastTime = currentTime
+    
+    local finalTargetPart = "UpperTorso"
+    local chosenPart = character:FindFirstChild(finalTargetPart) or character:FindFirstChild("Torso") or targetPart or hrp
+    
+    local targetPos = chosenPart.Position
+    local velocity = chosenPart.AssemblyLinearVelocity or Vector3.new()
+    
+    local predictionTime = math.clamp(NetworkMetrics.RTTBuffer + 0.03, 0.04, 0.15)
+    
+    local predictedPos = targetPos + (velocity * predictionTime)
+    
+    if velocity.Y ~= 0 then
+        local verticalPos = targetPos.Y + (velocity.Y * predictionTime) - (0.5 * PredictionSystem.gravity * predictionTime * predictionTime)
+        predictedPos = Vector3.new(predictedPos.X, verticalPos, predictedPos.Z)
     end
-    if velCount > 0 then avgVel = avgVel / velCount end
-    
-    if effectiveVelocity.Magnitude > 5 then
-        effectiveVelocity = effectiveVelocity:Lerp(avgVel, 0.15)
-    end
-    
-    if data.directionStability < 0.5 then
-        effectiveVelocity = effectiveVelocity * 0.75
-    end
-    
-    -- ============================================
-    -- MINIMAL ACCELERATION USAGE
-    -- ============================================
-    
-    local accelMagnitude = currentAccel.Magnitude
-    local accelInfluence = 0
-    
-    if accelMagnitude > 2 then
-        accelInfluence = 0.5
-    end
-    
-    -- ============================================
-    -- KINEMATIC EQUATION: s = ut + 0.5at²
-    -- ============================================
-    
-    local horizVel = Vector3.new(effectiveVelocity.X, 0, effectiveVelocity.Z)
-    local horizAccel = Vector3.new(currentAccel.X, 0, currentAccel.Z) * accelInfluence
-    
-    local horizontalPrediction = currentPos + 
-        horizVel * totalPredictionTime + 
-        0.5 * horizAccel * totalPredictionTime * totalPredictionTime
-    
-    local predictedY = currentPos.Y
-    
-    if not data.groundState and (math.abs(currentVel.Y) > 5 or data.jumpState) then
-        local verticalAccel = -PredictionSystem.gravity
-        predictedY = currentPos.Y + 
-            effectiveVelocity.Y * totalPredictionTime + 
-            0.5 * verticalAccel * totalPredictionTime * totalPredictionTime
-    else
-        predictedY = currentPos.Y
-    end
-    
-    local predictedPos = Vector3.new(horizontalPrediction.X, predictedY, horizontalPrediction.Z)
-    
-    -- ============================================
-    -- SANITY CHECK
-    -- ============================================
-    
-    if #data.positionHistory >= 2 then
-        local previousPos = data.positionHistory[2].pos
-        local maxDelta = math.max(data.velocityMagnitude * totalPredictionTime * 1.5, 50)
-        local actualDelta = (predictedPos - previousPos).Magnitude
-        
-        if actualDelta > maxDelta then
-            predictedPos = previousPos + (predictedPos - previousPos).Unit * maxDelta
-        end
-    end
-    
-    -- ============================================
-    -- LIGHT SMOOTHING WITH CACHE
-    -- ============================================
-    
-    if tick() - data.cacheTime < data.cacheTTL and data.predictionCache then
-        local cacheBlend = 0.15
-        predictedPos = data.predictionCache:Lerp(predictedPos, cacheBlend)
-    end
-    
-    data.predictionCache = predictedPos
-    data.cacheTime = tick()
     
     return predictedPos
 end
-
--- ============================================
--- STATE MANAGEMENT
--- ============================================
 
 local State = {
     SpeedBoost = { Enabled = false, Speed = 19 },
@@ -562,15 +211,19 @@ local State = {
     Teleport = { LastGunPos = nil },
     Desync = { featureEnabled = false, active = false, Keybind = "Z" },
     Fling = { isActive = false, currentTarget = nil },
-    MapCache = nil
+    MapCache = nil,
+    SilentHacker = {
+        Enabled = false,
+        Active = false,
+        Duration = 3,
+        BehindDistance = 0.5,
+        isDesyncing = false,
+        currentDesyncCoroutine = nil,
+    }
 }
 
 SetAimbotToggle = function(value) end
 SetDesyncToggle = function(value) end
-
--- ============================================
--- UTILITY FUNCTIONS
--- ============================================
 
 local function StringToKeyCode(str)
     if not str or str == "" then return nil end
@@ -672,6 +325,7 @@ local function isInnocent(plr)
     return plr ~= LocalPlayer and isAlive(plr) and not isMurderer(plr) and not isSheriff(plr) 
 end
 local function hasGun() return hasItem(LocalPlayer, "Gun") or hasItem(LocalPlayer, "Revolver") end
+
 local function getCurrentMap()
     if State.MapCache and State.MapCache.Parent then return State.MapCache end
     for _, v in ipairs(Workspace:GetDescendants()) do
@@ -683,10 +337,6 @@ local function getCurrentMap()
     State.MapCache = nil
     return nil
 end
-
--- ============================================
--- CUSTOM COLORS & NAMETAGS FOR HER SCREEN
--- ============================================
 
 local function getRoleColor(plr)
     if not plr or not plr.Character then return Color3.fromRGB(0, 255, 0) end
@@ -1402,10 +1052,10 @@ local function getMurdererTargetPosition()
         if plr ~= LocalPlayer and isAlive(plr) and isMurderer(plr) then
             local character = plr.Character
             if character then
-                local hrp = character:FindFirstChild("HumanoidRootPart")
-                if not hrp then return nil end
+                local torso = character:FindFirstChild("UpperTorso") or character:FindFirstChild("Torso")
+                if not torso then return nil end
                 
-                return predictPlayerPosition(plr, hrp)
+                return predictPlayerPosition(plr, torso)
             end
         end
     end
@@ -1465,12 +1115,14 @@ local function getBestTarget()
     local bestTarget, bestScore = nil, math.huge
     
     for _, plr in ipairs(Players:GetPlayers()) do
-        if plr ~= LocalPlayer and isAlive(plr) and plr.Character and plr.Character:FindFirstChild("Head") then
+        if plr ~= LocalPlayer and isAlive(plr) and plr.Character then
             if State.Aimbot.OnlyMurderer and not isMurderer(plr) then continue end
             
-            local head = plr.Character.Head
-            if head then
-                local screenPos, onScreen = camera:WorldToViewportPoint(head.Position)
+            local targetPart = plr.Character:FindFirstChild("UpperTorso") or plr.Character:FindFirstChild("Torso")
+            if not targetPart then targetPart = plr.Character:FindFirstChild("Head") end
+            
+            if targetPart then
+                local screenPos, onScreen = camera:WorldToViewportPoint(targetPart.Position)
                 
                 if onScreen then
                     local dist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
@@ -1497,10 +1149,12 @@ local function updateAimbot()
     local targetPlr = getBestTarget()
     if not targetPlr or not targetPlr.Character then return end
     
-    local hrp = targetPlr.Character:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
+    local targetPart = targetPlr.Character:FindFirstChild("UpperTorso") or targetPlr.Character:FindFirstChild("Torso")
+    if not targetPart then targetPart = targetPlr.Character:FindFirstChild("HumanoidRootPart") end
     
-    local predictedPos = predictPlayerPosition(targetPlr, hrp)
+    if not targetPart then return end
+    
+    local predictedPos = predictPlayerPosition(targetPlr, targetPart)
     
     local camera = Workspace.CurrentCamera
     local currentCFrame = camera.CFrame
@@ -1523,7 +1177,7 @@ local function getFlickTarget()
             if State.FlickShoot.OnlyMurderer and not isMurderer(plr) then continue end
             
             local character = plr.Character
-            if character and character:FindFirstChild("Head") then
+            if character then
                 return plr
             end
         end
@@ -1547,10 +1201,12 @@ local function performFlickShoot()
         return
     end
     
-    local hrp = targetPlr.Character:FindFirstChild("HumanoidRootPart")
-    if not hrp then return end
+    local targetPart = targetPlr.Character:FindFirstChild("UpperTorso") or targetPlr.Character:FindFirstChild("Torso")
+    if not targetPart then targetPart = targetPlr.Character:FindFirstChild("HumanoidRootPart") end
     
-    local targetPos = predictPlayerPosition(targetPlr, hrp)
+    if not targetPart then return end
+    
+    local targetPos = predictPlayerPosition(targetPlr, targetPart)
     
     local camera = Workspace.CurrentCamera
     local startCFrame = camera.CFrame
@@ -1574,6 +1230,195 @@ local function performFlickShoot()
 end
 
 RunService:BindToRenderStep("AnnieAimbotCamlock", Enum.RenderPriority.Camera.Value + 1, updateAimbot)
+
+local function findMurdererSilentHacker()
+    for _, player in ipairs(Players:GetPlayers()) do
+        if player ~= LocalPlayer and isAlive(player) and isMurderer(player) then
+            return player
+        end
+    end
+    return nil
+end
+
+local function predictMurdererPosSH(murderer)
+    if not murderer or not murderer.Character then
+        return nil
+    end
+    
+    local hrp = murderer.Character:FindFirstChild("HumanoidRootPart")
+    if not hrp then return nil end
+    
+    updateNetworkMetrics()
+    
+    local targetPos = hrp.Position
+    local velocity = hrp.AssemblyLinearVelocity or hrp.Velocity or Vector3.new()
+    
+    local predictionTime = (NetworkMetrics.ping / 1000) + 0.085
+    predictionTime = math.clamp(predictionTime, 0.03, 0.2)
+    
+    local predictedPos = targetPos + (velocity * predictionTime)
+    
+    if velocity.Y ~= 0 then
+        local gravity = Workspace.Gravity
+        local verticalPos = targetPos.Y + (velocity.Y * predictionTime) - 
+                           (0.5 * gravity * predictionTime * predictionTime)
+        predictedPos = Vector3.new(predictedPos.X, verticalPos, predictedPos.Z)
+    end
+    
+    return predictedPos
+end
+
+local function stopSilentHacker()
+    State.SilentHacker.isDesyncing = false
+    
+    if State.SilentHacker.currentDesyncCoroutine then
+        task.cancel(State.SilentHacker.currentDesyncCoroutine)
+        State.SilentHacker.currentDesyncCoroutine = nil
+    end
+    
+    Notifier.new({Title="Silent Hacker", Content="Deactivated", Duration=1.5})
+end
+
+local function performSilentHacker()
+    if State.SilentHacker.isDesyncing then 
+        return 
+    end
+    
+    if not State.SilentHacker.Enabled then return end
+    
+    local character = LocalPlayer.Character
+    if not character then return end
+    
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if not humanoid or humanoid.Health <= 0 then return end
+    
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then return end
+    
+    local murderer = findMurdererSilentHacker()
+    if not murderer then 
+        return 
+    end
+    
+    local predictedPos = predictMurdererPosSH(murderer)
+    if not predictedPos then return end
+    
+    local originalCFrame = rootPart.CFrame
+    
+    State.SilentHacker.isDesyncing = true
+    
+    Notifier.new({Title="Silent Hacker", Content="TOUCHING "..murderer.Name.."'s BACK!", Duration=3})
+    
+    if State.SilentHacker.currentDesyncCoroutine then
+        task.cancel(State.SilentHacker.currentDesyncCoroutine)
+    end
+    
+    State.SilentHacker.currentDesyncCoroutine = task.spawn(function()
+        local startTime = tick()
+        local timeRemaining = State.SilentHacker.Duration
+        
+        while timeRemaining > 0 and State.SilentHacker.isDesyncing do
+            timeRemaining = State.SilentHacker.Duration - (tick() - startTime)
+            
+            if not rootPart or not rootPart.Parent then
+                stopSilentHacker()
+                return
+            end
+            
+            murderer = findMurdererSilentHacker()
+            if not murderer or not isAlive(murderer) then
+                stopSilentHacker()
+                return
+            end
+            
+            local newPredictedPos = predictMurdererPosSH(murderer)
+            if not newPredictedPos then
+                task.wait(0.016)
+                continue
+            end
+            
+            predictedPos = newPredictedPos
+            
+            local murdererHRP = murderer.Character:FindFirstChild("HumanoidRootPart")
+            if not murdererHRP then
+                task.wait(0.016)
+                continue
+            end
+            
+            local murdererLookVector = murdererHRP.CFrame.LookVector
+            local behindPosition = predictedPos - (murdererLookVector * State.SilentHacker.BehindDistance)
+            behindPosition = Vector3.new(behindPosition.X, predictedPos.Y, behindPosition.Z)
+            
+            local behindCFrame = CFrame.lookAt(behindPosition, predictedPos)
+            
+            local clientVisualPosition = rootPart.CFrame
+            
+            rootPart.CFrame = behindCFrame
+            
+            RunService.Heartbeat:Wait()
+            
+            if rootPart and rootPart.Parent then
+                rootPart.CFrame = clientVisualPosition
+            end
+            
+            task.wait(0.016)
+        end
+        
+        stopSilentHacker()
+    end)
+    
+    return murderer.Name
+end
+
+local gunHookConnected = false
+
+local function setupSilentHackerGunHook()
+    if gunHookConnected then return end
+    gunHookConnected = true
+    
+    local function hookGunActivate(gun)
+        if not gun or not gun:IsA("Tool") then return end
+        if not (gun.Name == "Gun" or gun.Name == "Revolver") then return end
+        
+        local originalActivated = gun.Activated:Connect(function()
+            if State.SilentHacker.Enabled then
+                pcall(performSilentHacker)
+            end
+        end)
+    end
+    
+    local char = LocalPlayer.Character
+    if char then
+        for _, item in ipairs(char:GetChildren()) do
+            if item:IsA("Tool") then
+                hookGunActivate(item)
+            end
+        end
+        
+        char.ChildAdded:Connect(function(child)
+            if child:IsA("Tool") then
+                hookGunActivate(child)
+            end
+        end)
+    end
+    
+    LocalPlayer.CharacterAdded:Connect(function(newChar)
+        task.wait(0.5)
+        for _, item in ipairs(newChar:GetChildren()) do
+            if item:IsA("Tool") then
+                hookGunActivate(item)
+            end
+        end
+        
+        newChar.ChildAdded:Connect(function(child)
+            if child:IsA("Tool") then
+                hookGunActivate(child)
+            end
+        end)
+    end)
+end
+
+setupSilentHackerGunHook()
 
 UserInputService.InputBegan:Connect(function(input, gp)
     if gp then return end
@@ -2020,10 +1865,6 @@ OriginalCFrameHook = hookmetamethod(game, "__index", newcclosure(function(Self, 
     return OriginalCFrameHook(Self, Key)
 end))
 
--- ============================================
--- UI CREATION
--- ============================================
-
 local Window = Compkiller.new({
     Name = "I Love Annie - MM2 ENHANCED AUTO",
     Keybind = "P",
@@ -2048,8 +1889,8 @@ task.spawn(function()
 end)
 
 Notifier.new({
-    Title = "I Love Annie - MM2 ENHANCED v2.0 ACCURATE",
-    Content = "Accurate Physics-Based Prediction Activated",
+    Title = "I Love Annie - MM2 ENHANCED v2.0 FIXED",
+    Content = "Simplified Prediction System Active - Stable Targeting",
     Duration = 6,
     Icon = "rbxassetid://120245531583106"
 });
@@ -2106,7 +1947,7 @@ VisualsGunSection:AddToggle({
 })
 
 local SheriffTab = Window:DrawTab({ Name = "Sheriff", Icon = "target", EnableScrolling = true })
-local SheriffCameraSection = SheriffTab:DrawSection({ Name = "Camera Aimbot", Position = 'left' })
+local SheriffCameraSection = SheriffTab:DrawSection({ Name = "Camera Aimbot (TORSO)", Position = 'left' })
 
 AimbotToggle = SheriffCameraSection:AddToggle({
     Name = "Enable Aimbot Feature",
@@ -2120,7 +1961,7 @@ AimbotToggle = SheriffCameraSection:AddToggle({
             LastLockedTarget = nil
         end
         SetAimbotToggle(State.Aimbot.active)
-        Notifier.new({Title="Aimbot", Content=v and "Enabled - ACCURATE PREDICTION" or "Disabled", Duration=2})
+        Notifier.new({Title="Aimbot", Content=v and "Enabled - SIMPLE PREDICTION" or "Disabled", Duration=2})
     end,
 })
 
@@ -2157,7 +1998,7 @@ SheriffCameraSection:AddKeybind({
     Callback = function(v) State.Aimbot.Keybind = v end,
 })
 
-local SheriffFlickSection = SheriffTab:DrawSection({ Name = "Flick Shoot", Position = 'left' })
+local SheriffFlickSection = SheriffTab:DrawSection({ Name = "Flick Shoot (TORSO)", Position = 'left' })
 
 SheriffFlickSection:AddToggle({
     Name = "Enable Flick Shoot",
@@ -2165,7 +2006,7 @@ SheriffFlickSection:AddToggle({
     Default = false,
     Callback = function(v)
         State.FlickShoot.Enabled = v
-        Notifier.new({Title="Flick Shoot", Content=v and "Enabled - ACCURATE PREDICTION" or "Disabled", Duration=2})
+        Notifier.new({Title="Flick Shoot", Content=v and "Enabled - SIMPLE PREDICTION" or "Disabled", Duration=2})
     end,
 })
 
@@ -2183,13 +2024,13 @@ SheriffFlickSection:AddKeybind({
     Callback = function(v) State.FlickShoot.Keybind = v end,
 })
 
-local SheriffSilentSection = SheriffTab:DrawSection({ Name = "Silent Aim", Position = 'left' })
+local SheriffSilentSection = SheriffTab:DrawSection({ Name = "Silent Aim (TORSO)", Position = 'left' })
 
 SheriffSilentSection:AddToggle({
     Name = "Enable Silent Aim",
     Flag = "SilentAim_Enabled",
     Default = false,
-    Callback = function(v) silentAimEnabled = v; Notifier.new({Title="Silent Aim", Content=v and "Enabled - ACCURATE PREDICTION" or "Disabled", Duration=2}) end,
+    Callback = function(v) silentAimEnabled = v; Notifier.new({Title="Silent Aim", Content=v and "Enabled - SIMPLE PREDICTION" or "Disabled", Duration=2}) end,
 })
 
 SheriffSilentSection:AddToggle({
@@ -2197,6 +2038,29 @@ SheriffSilentSection:AddToggle({
     Flag = "AimOnlyHolding",
     Default = false,
     Callback = function(v) aimOnlyWhenHolding = v end,
+})
+
+local SheriffSilentHackerSection = SheriffTab:DrawSection({ Name = "Silent Hacker - Touch Back", Position = 'left' })
+
+local SilentHackerToggle = SheriffSilentHackerSection:AddToggle({
+    Name = "Enable Silent Hacker",
+    Flag = "SilentHacker_Enabled",
+    Default = false,
+    Callback = function(v)
+        State.SilentHacker.Enabled = v
+        if not v then
+            if State.SilentHacker.isDesyncing then
+                stopSilentHacker()
+            end
+        end
+        Notifier.new({Title="Silent Hacker", Content=v and "Ready - Shoot to activate" or "Disabled", Duration=2})
+    end,
+})
+
+SheriffSilentHackerSection:AddSlider({
+    Name = "Duration (seconds)",
+    Min = 1, Max = 10, Default = 3, Round = 0, Flag = "SilentHacker_Duration",
+    Callback = function(v) State.SilentHacker.Duration = v end
 })
 
 local SheriffTriggerSection = SheriffTab:DrawSection({ Name = "Triggerbot", Position = 'left' })
@@ -2610,7 +2474,6 @@ UISettingsSection:AddColorPicker({
 UISettingsSection:AddButton({
     Name = "Get Theme",
     Callback = function()
-        print(Compkiller:GetTheme())
         Notifier.new({Title="Theme", Content="Copied to clipboard", Duration=3})
     end,
 })
@@ -2633,14 +2496,14 @@ task.spawn(function()
     Compkiller:SetTheme("Dark Blue")
     Notifier.new({
         Title = "Theme Applied",
-        Content = "Dark Blue theme loaded automatically!",
+        Content = "Dark Blue theme loaded!",
         Duration = 3,
         Icon = "paint-brush"
     })
 end)
 
 Notifier.new({
-    Title = "I Love Annie - MM2 ENHANCED v2.0 ACCURATE",
-    Content = "Accurate Physics-Based Prediction Fully Active",
+    Title = "I Love Annie - MM2 ENHANCED v2.0 FIXED",
+    Content = "Simple & Stable Prediction Active - Torso Targeting Enabled",
     Duration = 6
 })
