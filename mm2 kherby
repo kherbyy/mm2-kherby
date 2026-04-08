@@ -2503,7 +2503,7 @@ task.spawn(function()
 end)
 
 Notifier.new({
-    Title = "I Love Annie - MM2 ENHANCED v2.0 FIXED",
-    Content = "Simple & Stable Prediction Active - Torso Targeting Enabled",
+    Title = "I Love Annie",
+    Content = "loaded",
     Duration = 6
 })
