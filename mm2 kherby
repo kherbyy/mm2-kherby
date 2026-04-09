@@ -183,7 +183,7 @@ end
 
 local State = {
     SpeedBoost = { Enabled = false, Speed = 19 },
-    ESP = { Enabled = false, NameTags = true, FillTransparency = 0.4 },
+    ESP = { Enabled = false, NameTags = true, FillTransparency = 0.84 },
     Aimbot = { 
         featureEnabled = false, 
         active = false, 
@@ -216,9 +216,11 @@ local State = {
         Enabled = false,
         Active = false,
         Duration = 3,
-        BehindDistance = 0.5,
+        BehindDistance = 2,
         isDesyncing = false,
         currentDesyncCoroutine = nil,
+        currentTarget = nil,
+        startTime = 0,
     }
 }
 
@@ -391,15 +393,15 @@ local function CreateESP(char, plr)
             local bill = Instance.new("BillboardGui")
             bill.Name = "MM2NameTag"
             bill.Adornee = adornee
-            bill.Size = UDim2.new(9, 0, 2.5, 0)
-            bill.StudsOffset = Vector3.new(0, 6, 0)
+            bill.Size = UDim2.new(4, 0, 1.5, 0)
+            bill.StudsOffset = Vector3.new(0, 2, 0)
             bill.AlwaysOnTop = true
             bill.LightInfluence = 0
             bill.Parent = char
             
             local txt = Instance.new("TextLabel")
             txt.Size = UDim2.new(1,0,1,0)
-            txt.BackgroundTransparency = 0.35
+            txt.BackgroundTransparency = 1
             txt.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
             
             txt.Text = getDisplayName(plr)
@@ -1048,18 +1050,28 @@ local aimOnlyWhenHolding = false
 local originalGetTarget = nil
 
 local function getMurdererTargetPosition()
-    for _, plr in ipairs(Players:GetPlayers()) do
-        if plr ~= LocalPlayer and isAlive(plr) and isMurderer(plr) then
-            local character = plr.Character
-            if character then
-                local torso = character:FindFirstChild("UpperTorso") or character:FindFirstChild("Torso")
-                if not torso then return nil end
-                
-                return predictPlayerPosition(plr, torso)
+    local targetMurderer = nil
+    
+    if State.SilentHacker.Enabled and State.SilentHacker.isDesyncing and State.SilentHacker.currentTarget then
+        targetMurderer = State.SilentHacker.currentTarget
+    else
+        for _, plr in ipairs(Players:GetPlayers()) do
+            if plr ~= LocalPlayer and isAlive(plr) and isMurderer(plr) then
+                targetMurderer = plr
+                break
             end
         end
     end
-    return nil
+    
+    if not targetMurderer or not targetMurderer.Character then
+        return nil
+    end
+    
+    local character = targetMurderer.Character
+    local torso = character:FindFirstChild("UpperTorso") or character:FindFirstChild("Torso")
+    if not torso then return nil end
+    
+    return predictPlayerPosition(targetMurderer, torso)
 end
 
 local function setupSilentAim()
@@ -1076,7 +1088,7 @@ local function setupSilentAim()
             end
             return originalGetTarget(self, ...)
         end
-        Notifier.new({Title="Silent Aim Ready", Content="Accurate prediction enabled", Duration=2})
+        Notifier.new({Title="Silent Aim Ready", Content="Integrated with Silent Hacker", Duration=2})
     end
 end
 
@@ -1270,6 +1282,7 @@ end
 
 local function stopSilentHacker()
     State.SilentHacker.isDesyncing = false
+    State.SilentHacker.currentTarget = nil
     
     if State.SilentHacker.currentDesyncCoroutine then
         task.cancel(State.SilentHacker.currentDesyncCoroutine)
@@ -1285,6 +1298,10 @@ local function performSilentHacker()
     end
     
     if not State.SilentHacker.Enabled then return end
+    if not silentAimEnabled then 
+        Notifier.new({Title="Silent Hacker", Content="Enable Silent Aim first!", Duration=2})
+        return
+    end
     
     local character = LocalPlayer.Character
     if not character then return end
@@ -1300,14 +1317,14 @@ local function performSilentHacker()
         return 
     end
     
+    State.SilentHacker.currentTarget = murderer
+    
     local predictedPos = predictMurdererPosSH(murderer)
     if not predictedPos then return end
     
-    local originalCFrame = rootPart.CFrame
-    
     State.SilentHacker.isDesyncing = true
     
-    Notifier.new({Title="Silent Hacker", Content="TOUCHING "..murderer.Name.."'s BACK!", Duration=3})
+    Notifier.new({Title="Silent Hacker ACTIVE", Content="Behind "..murderer.Name.." - AUTO SHOOTING!", Duration=3})
     
     if State.SilentHacker.currentDesyncCoroutine then
         task.cancel(State.SilentHacker.currentDesyncCoroutine)
@@ -1330,6 +1347,8 @@ local function performSilentHacker()
                 stopSilentHacker()
                 return
             end
+            
+            State.SilentHacker.currentTarget = murderer
             
             local newPredictedPos = predictMurdererPosSH(murderer)
             if not newPredictedPos then
@@ -1380,8 +1399,8 @@ local function setupSilentHackerGunHook()
         if not gun or not gun:IsA("Tool") then return end
         if not (gun.Name == "Gun" or gun.Name == "Revolver") then return end
         
-        local originalActivated = gun.Activated:Connect(function()
-            if State.SilentHacker.Enabled then
+        gun.Activated:Connect(function()
+            if State.SilentHacker.Enabled and silentAimEnabled then
                 pcall(performSilentHacker)
             end
         end)
@@ -1889,8 +1908,8 @@ task.spawn(function()
 end)
 
 Notifier.new({
-    Title = "I Love Annie - MM2 ENHANCED v2.0 FIXED",
-    Content = "Simplified Prediction System Active - Stable Targeting",
+    Title = "I Love Annie - MM2 INTEGRATED",
+    Content = "Silent Hacker + Silent Aim Connected - AUTO SHOOTING!",
     Duration = 6,
     Icon = "rbxassetid://120245531583106"
 });
@@ -1919,7 +1938,7 @@ VisualsPlayerSection:AddToggle({
 
 VisualsPlayerSection:AddSlider({
     Name = "Highlight Fill Transparency",
-    Min = 0, Max = 1, Default = 0.4, Round = 2, Flag = "FillTransparency_Value",
+    Min = 0, Max = 1, Default = 0.84, Round = 2, Flag = "FillTransparency_Value",
     Callback = function(v) State.ESP.FillTransparency = v; UpdateAllESPColors() end
 })
 
@@ -1961,7 +1980,7 @@ AimbotToggle = SheriffCameraSection:AddToggle({
             LastLockedTarget = nil
         end
         SetAimbotToggle(State.Aimbot.active)
-        Notifier.new({Title="Aimbot", Content=v and "Enabled - SIMPLE PREDICTION" or "Disabled", Duration=2})
+        Notifier.new({Title="Aimbot", Content=v and "Enabled" or "Disabled", Duration=2})
     end,
 })
 
@@ -2006,7 +2025,7 @@ SheriffFlickSection:AddToggle({
     Default = false,
     Callback = function(v)
         State.FlickShoot.Enabled = v
-        Notifier.new({Title="Flick Shoot", Content=v and "Enabled - SIMPLE PREDICTION" or "Disabled", Duration=2})
+        Notifier.new({Title="Flick Shoot", Content=v and "Enabled" or "Disabled", Duration=2})
     end,
 })
 
@@ -2030,7 +2049,7 @@ SheriffSilentSection:AddToggle({
     Name = "Enable Silent Aim",
     Flag = "SilentAim_Enabled",
     Default = false,
-    Callback = function(v) silentAimEnabled = v; Notifier.new({Title="Silent Aim", Content=v and "Enabled - SIMPLE PREDICTION" or "Disabled", Duration=2}) end,
+    Callback = function(v) silentAimEnabled = v; Notifier.new({Title="Silent Aim", Content=v and "Enabled - MASTER CONTROL" or "Disabled", Duration=2}) end,
 })
 
 SheriffSilentSection:AddToggle({
@@ -2040,7 +2059,7 @@ SheriffSilentSection:AddToggle({
     Callback = function(v) aimOnlyWhenHolding = v end,
 })
 
-local SheriffSilentHackerSection = SheriffTab:DrawSection({ Name = "(enable silent aim first)", Position = 'left' })
+local SheriffSilentHackerSection = SheriffTab:DrawSection({ Name = "(REQUIRES SILENT AIM)", Position = 'left' })
 
 local SilentHackerToggle = SheriffSilentHackerSection:AddToggle({
     Name = "Enable Silent Hacker",
@@ -2053,7 +2072,7 @@ local SilentHackerToggle = SheriffSilentHackerSection:AddToggle({
                 stopSilentHacker()
             end
         end
-        Notifier.new({Title="Silent Hacker", Content=v and "Ready - Shoot to activate" or "Disabled", Duration=2})
+        Notifier.new({Title="Silent Hacker", Content=v and "READY - SHOOT TO TELEPORT BEHIND + AUTO AIM" or "Disabled", Duration=3})
     end,
 })
 
@@ -2061,6 +2080,12 @@ SheriffSilentHackerSection:AddSlider({
     Name = "Duration (seconds)",
     Min = 1, Max = 10, Default = 3, Round = 0, Flag = "SilentHacker_Duration",
     Callback = function(v) State.SilentHacker.Duration = v end
+})
+
+SheriffSilentHackerSection:AddSlider({
+    Name = "Behind Distance (studs)",
+    Min = 0.5, Max = 10, Default = 2, Round = 1, Flag = "SilentHacker_BehindDistance",
+    Callback = function(v) State.SilentHacker.BehindDistance = v end
 })
 
 local SheriffTriggerSection = SheriffTab:DrawSection({ Name = "Triggerbot", Position = 'left' })
@@ -2503,7 +2528,7 @@ task.spawn(function()
 end)
 
 Notifier.new({
-    Title = "I Love Annie",
+    Title = "i love annie",
     Content = "loaded",
     Duration = 6
 })
