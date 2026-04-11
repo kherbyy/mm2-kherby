@@ -546,7 +546,7 @@ local function updateNetworkMetrics()
     NetworkMetrics.lastUpdate = currentTime
 end
 
--- ===== PREDICTION FUNCTIONS (IN CORRECT ORDER) =====
+-- ===== ADVANCED PREDICTION FUNCTIONS (FOR STRAFING & ZIGZAG) =====
 local function initPlayerData(player)
     if not PredictionSystem.playerData[player] then
         PredictionSystem.playerData[player] = {
@@ -555,8 +555,11 @@ local function initPlayerData(player)
             lastTime = tick(),
             positionHistory = {},
             velocityHistory = {},
+            directionHistory = {},
             lastTargetPart = "UpperTorso",
             wasJumping = false,
+            strafeDirection = 0,
+            lastStrafeTime = 0,
         }
     end
     return PredictionSystem.playerData[player]
@@ -574,7 +577,47 @@ local function isPlayerJumping(character)
     return false
 end
 
-local function predictPlayerPosition(player, targetPart)
+-- Detect strafing direction (left/right movement)
+local function detectStrafeDirection(player, currentVel)
+    local data = initPlayerData(player)
+    
+    if #data.velocityHistory < 3 then
+        return 0
+    end
+    
+    -- Get previous velocities
+    local prevVel = data.velocityHistory[#data.velocityHistory - 1]
+    if not prevVel then return 0 end
+    
+    -- Calculate horizontal velocity vectors (ignore Y axis)
+    local currentHoriz = Vector3.new(currentVel.X, 0, currentVel.Z)
+    local prevHoriz = Vector3.new(prevVel.vel.X, 0, prevVel.vel.Z)
+    
+    if currentHoriz.Magnitude < 5 or prevHoriz.Magnitude < 5 then
+        return 0
+    end
+    
+    -- Calculate direction change (cross product to detect left/right)
+    local currentDir = currentHoriz.Unit
+    local prevDir = prevHoriz.Unit
+    
+    -- Cross product Y value indicates left/right turn
+    local crossY = prevDir.X * currentDir.Z - prevDir.Z * currentDir.X
+    
+    -- Positive = turning right, Negative = turning left
+    local strafeDirection = crossY > 0.1 and 1 or (crossY < -0.1 and -1 or 0)
+    
+    -- Update strafe timing
+    if strafeDirection ~= 0 and strafeDirection ~= data.strafeDirection then
+        data.lastStrafeTime = tick()
+    end
+    data.strafeDirection = strafeDirection
+    
+    return strafeDirection
+end
+
+-- Predict position with strafe/zigzag compensation
+local function predictPlayerPositionAdvanced(player, targetPart)
     if not player or not player.Character then
         return targetPart and targetPart.Position or Vector3.new()
     end
@@ -593,14 +636,24 @@ local function predictPlayerPosition(player, targetPart)
     local currentPos = hrp.Position
     local currentVel = hrp.Velocity
     
+    -- Store history
     table.insert(data.positionHistory, 1, {pos = currentPos, time = currentTime})
-    if #data.positionHistory > 10 then
+    if #data.positionHistory > 15 then
         table.remove(data.positionHistory)
     end
     
     table.insert(data.velocityHistory, 1, {vel = currentVel, time = currentTime})
-    if #data.velocityHistory > 10 then
+    if #data.velocityHistory > 15 then
         table.remove(data.velocityHistory)
+    end
+    
+    -- Store direction history for strafe detection
+    if currentVel.Magnitude > 1 then
+        local currentDir = currentVel.Unit
+        table.insert(data.directionHistory, 1, currentDir)
+        if #data.directionHistory > 10 then
+            table.remove(data.directionHistory)
+        end
     end
     
     data.lastPosition = currentPos
@@ -622,23 +675,97 @@ local function predictPlayerPosition(player, targetPart)
     local targetPos = chosenPart.Position
     local velocity = chosenPart.AssemblyLinearVelocity or Vector3.new()
     
+    -- Base prediction time
     local basePrediction = NetworkMetrics.RTTBuffer + 0.03
-    local speedBonus = math.min(velocity.Magnitude / 2000, 0.05)
-    local predictionTime = math.clamp(basePrediction + speedBonus, 0.04, 0.18)
+    local speedBonus = math.min(velocity.Magnitude / 2000, 0.08)
+    local predictionTime = math.clamp(basePrediction + speedBonus, 0.04, 0.2)
     
+    -- STRAFE/ZIGZAG DETECTION AND COMPENSATION
+    local strafeDirection = detectStrafeDirection(player, velocity)
+    local isStrafing = math.abs(strafeDirection) > 0
+    local isZigzagging = false
+    
+    -- Detect zigzag (frequent direction changes)
+    if #data.directionHistory >= 5 then
+        local directionChanges = 0
+        for i = 2, #data.directionHistory do
+            local dot = data.directionHistory[i-1]:Dot(data.directionHistory[i])
+            if dot < 0.7 then -- Significant direction change
+                directionChanges = directionChanges + 1
+            end
+        end
+        isZigzagging = directionChanges >= 3
+    end
+    
+    -- Start with linear prediction
     local predictedPos = targetPos + (velocity * predictionTime)
     
+    -- Apply gravity for vertical movement
     if velocity.Y ~= 0 then
         local gravity = PredictionSystem.gravity
         local verticalPos = targetPos.Y + (velocity.Y * predictionTime) - (0.5 * gravity * predictionTime * predictionTime)
         predictedPos = Vector3.new(predictedPos.X, verticalPos, predictedPos.Z)
     end
     
+    -- STRAFE COMPENSATION
+    if isStrafing and velocity.Magnitude > 8 then
+        -- Predict strafe offset based on direction
+        local strafeOffset = 0
+        local strafeStrength = math.min(velocity.Magnitude / 50, 2.5)
+        
+        if strafeDirection > 0 then
+            -- Strafing right - aim slightly ahead in that direction
+            local rightVector = chosenPart.CFrame.RightVector
+            strafeOffset = strafeStrength * predictionTime * 15
+            predictedPos = predictedPos + (rightVector * strafeOffset)
+        elseif strafeDirection < 0 then
+            -- Strafing left - aim slightly ahead in that direction
+            local leftVector = -chosenPart.CFrame.RightVector
+            strafeOffset = strafeStrength * predictionTime * 15
+            predictedPos = predictedPos + (leftVector * strafeOffset)
+        end
+    end
+    
+    -- ZIGZAG COMPENSATION (harder to predict, aim more central)
+    if isZigzagging then
+        -- When zigzagging, aim more towards center mass and reduce horizontal offset
+        predictedPos = Vector3.new(
+            predictedPos.X,
+            predictedPos.Y + 0.5, -- Slightly higher for zigzag
+            predictedPos.Z
+        )
+        -- Add small random offset to compensate for erratic movement
+        local zigzagFactor = math.sin(tick() * 15) * 0.8
+        predictedPos = predictedPos + (chosenPart.CFrame.RightVector * zigzagFactor * 0.5)
+    end
+    
+    -- Jumping adjustment (aim lower)
     if isJumping then
-        predictedPos = Vector3.new(predictedPos.X, predictedPos.Y - 1.5, predictedPos.Z)
+        predictedPos = Vector3.new(predictedPos.X, predictedPos.Y - 1.8, predictedPos.Z)
+    end
+    
+    -- Use velocity history for smoothing (reduces jitter)
+    if #data.velocityHistory >= 3 then
+        local avgVelX = 0
+        local avgVelZ = 0
+        for i = 1, math.min(3, #data.velocityHistory) do
+            avgVelX = avgVelX + data.velocityHistory[i].vel.X
+            avgVelZ = avgVelZ + data.velocityHistory[i].vel.Z
+        end
+        avgVelX = avgVelX / 3
+        avgVelZ = avgVelZ / 3
+        local smoothedVel = Vector3.new(avgVelX, velocity.Y, avgVelZ)
+        local smoothedPos = targetPos + (smoothedVel * predictionTime)
+        -- Blend between linear and smoothed (70/30)
+        predictedPos = predictedPos * 0.7 + smoothedPos * 0.3
     end
     
     return predictedPos
+end
+
+-- Simplified version for functions that don't need advanced prediction
+local function predictPlayerPosition(player, targetPart)
+    return predictPlayerPositionAdvanced(player, targetPart)
 end
 
 -- ===== STATE =====
@@ -1710,7 +1837,8 @@ local function updateAimbot()
     
     if not targetPart then return end
     
-    local predictedPos = predictPlayerPosition(targetPlr, targetPart)
+    -- Use advanced prediction for strafing/zigzagging
+    local predictedPos = predictPlayerPositionAdvanced(targetPlr, targetPart)
     
     local camera = Workspace.CurrentCamera
     local currentCFrame = camera.CFrame
@@ -1721,7 +1849,11 @@ local function updateAimbot()
     
     if targetPlr ~= LastLockedTarget then
         LastLockedTarget = targetPlr
-        Notifier.new({Title="Aimbot Locked", Content="Target: "..targetPlr.Name..(isMurderer(targetPlr) and " (Murderer)" or "")..(isJumping and " (Jumping - aiming lower)" or ""), Duration=1.8})
+        local strafeInfo = ""
+        if math.abs(detectStrafeDirection(targetPlr, targetPlr.Character.HumanoidRootPart.Velocity)) > 0 then
+            strafeInfo = " (Strafing)"
+        end
+        Notifier.new({Title="Aimbot Locked", Content="Target: "..targetPlr.Name..(isMurderer(targetPlr) and " (Murderer)" or "")..(isJumping and " (Jumping)" or "")..strafeInfo, Duration=1.5})
     end
 end
 
@@ -1770,7 +1902,7 @@ local function performFlickShoot()
     
     if not targetPart then return end
     
-    local targetPos = predictPlayerPosition(targetPlr, targetPart)
+    local targetPos = predictPlayerPositionAdvanced(targetPlr, targetPart)
     
     local camera = Workspace.CurrentCamera
     local startCFrame = camera.CFrame
@@ -2458,7 +2590,7 @@ local AutoFarm = {
     coinsList = {},
     coinHighlights = {},
     isWaitingForNewCoins = false,
-    tweenSpeed = 0.8, -- Default tween speed
+    tweenSpeed = 0.8,
 }
 
 local function isCoin(part)
@@ -2544,14 +2676,12 @@ local function desyncCollect(targetPos)
     return true
 end
 
--- TWEEN COLLECT with adjustable speed
 local function tweenCollect(targetPos)
     local character = LocalPlayer.Character
     local rootPart = character and character:FindFirstChild("HumanoidRootPart")
     if not rootPart then return false end
     
     local targetCFrame = CFrame.new(targetPos.X, targetPos.Y + 2, targetPos.Z)
-    -- Use the adjustable tween speed (1 = 1 second, 2 = 2 seconds, etc.)
     local tweenInfo = TweenInfo.new(State.AutoFarm.TweenSpeed, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut)
     local tween = TweenService:Create(rootPart, tweenInfo, {CFrame = targetCFrame})
     tween:Play()
@@ -2644,7 +2774,6 @@ local function setAutoFarmMode(mode)
 end
 
 local function setTweenSpeed(speed)
-    -- Convert slider value (1-100) to seconds (1 = 0.3s, 100 = 3s)
     State.AutoFarm.TweenSpeed = 0.3 + (speed / 100) * 2.7
 end
 
@@ -2680,7 +2809,7 @@ end)
 
 Notifier.new({
     Title = "I Love Annie - MM2 + TRADE + NOCLIP + AUTO FARM",
-    Content = "Trade system + Noclip + Auto Farm running in background | Silent Hacker + Silent Aim Connected!",
+    Content = "Trade system + Noclip + Auto Farm running in background | Silent Hacker + Silent Aim Connected! | Advanced Prediction for Strafing/Zigzag!",
     Duration = 8,
     Icon = "rbxassetid://120245531583106"
 });
@@ -3293,7 +3422,6 @@ AutoFarmSection:AddDropdown({
     end,
 })
 
--- TWEEN SPEED SLIDER (1-100)
 AutoFarmSection:AddSlider({
     Name = "Tween Speed (1 = Fast, 100 = Slow)",
     Min = 1,
@@ -3361,7 +3489,7 @@ task.spawn(function()
     Compkiller:SetTheme("Dark Blue")
     Notifier.new({
         Title = "Theme Applied",
-        Content = "loaded",
+        Content = "Dark Blue theme loaded",
         Duration = 4,
         Icon = "paint-brush"
     })
