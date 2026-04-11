@@ -2523,8 +2523,8 @@ task.spawn(function()
 end)
 
 Notifier.new({
-    Title = "I Love Annie - MM2 + TRADE + NOCLIP + FPS BOOST",
-    Content = "Trade system + Noclip + FPS Boost running in background | Silent Hacker + Silent Aim Connected!",
+    Title = "MM2",
+    Content = "LOADED!",
     Duration = 8,
     Icon = "rbxassetid://120245531583106"
 });
