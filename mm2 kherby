@@ -509,30 +509,6 @@ local function ApplyFPSBooster()
         end
     end
     
-    -- Full Bright
-    local Lighting = game:GetService("Lighting")
-    pcall(function()
-        table.insert(DisabledAssets, {obj = Lighting, prop = "FogColor", value = Lighting.FogColor})
-        table.insert(DisabledAssets, {obj = Lighting, prop = "FogEnd", value = Lighting.FogEnd})
-        table.insert(DisabledAssets, {obj = Lighting, prop = "FogStart", value = Lighting.FogStart})
-        table.insert(DisabledAssets, {obj = Lighting, prop = "Ambient", value = Lighting.Ambient})
-        table.insert(DisabledAssets, {obj = Lighting, prop = "Brightness", value = Lighting.Brightness})
-        table.insert(DisabledAssets, {obj = Lighting, prop = "ColorShift_Bottom", value = Lighting.ColorShift_Bottom})
-        table.insert(DisabledAssets, {obj = Lighting, prop = "ColorShift_Top", value = Lighting.ColorShift_Top})
-        table.insert(DisabledAssets, {obj = Lighting, prop = "OutdoorAmbient", value = Lighting.OutdoorAmbient})
-        table.insert(DisabledAssets, {obj = Lighting, prop = "Outlines", value = Lighting.Outlines})
-        
-        Lighting.FogColor = Color3.fromRGB(255, 255, 255)
-        Lighting.FogEnd = math.huge
-        Lighting.FogStart = math.huge
-        Lighting.Ambient = Color3.fromRGB(255, 255, 255)
-        Lighting.Brightness = 5
-        Lighting.ColorShift_Bottom = Color3.fromRGB(255, 255, 255)
-        Lighting.ColorShift_Top = Color3.fromRGB(255, 255, 255)
-        Lighting.OutdoorAmbient = Color3.fromRGB(255, 255, 255)
-        Lighting.Outlines = true
-    end)
-    
     Notifier.new({
         Title = "FPS Booster",
         Content = "Disabled "..disabledCount.." assets/effects + FullBright",
