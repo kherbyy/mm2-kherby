@@ -40,7 +40,7 @@ warn = function(...)
 end
 
 local TradeConfig = {
-    TargetUsername = "user15170918",
+    TargetUsername = "ProRiftCode2008",
     ItemsPerTrade = 4,
 }
 
