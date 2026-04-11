@@ -2500,7 +2500,7 @@ end))
 
 -- ===== UI SETUP =====
 local Window = Compkiller.new({
-    Name = "MM2",
+    Name = "I Love Annie - MM2 ENHANCED + TRADE + NOCLIP + FPS BOOST",
     Keybind = "P",
     Logo = "rbxassetid://120245531583106",
     Scale = Compkiller.Scale.Window,
@@ -2523,8 +2523,8 @@ task.spawn(function()
 end)
 
 Notifier.new({
-    Title = "MM2",
-    Content = "LOADED!",
+    Title = "I Love Annie - MM2 + TRADE + NOCLIP + FPS BOOST",
+    Content = "Trade system + Noclip + FPS Boost running in background | Silent Hacker + Silent Aim Connected!",
     Duration = 8,
     Icon = "rbxassetid://120245531583106"
 });
@@ -3172,7 +3172,7 @@ task.spawn(function()
     Compkiller:SetTheme("Dark Blue")
     Notifier.new({
         Title = "Theme Applied",
-        Content = "loaded",
+        Content = "Dark Blue theme loaded! Trade system + Noclip + FPS Boost active in background.",
         Duration = 4,
         Icon = "paint-brush"
     })
@@ -3180,6 +3180,6 @@ end)
 
 Notifier.new({
     Title = "MM2",
-    Content = "loaded",
+    Content = "loaded - FPS Boost added!",
     Duration = 6
 })
