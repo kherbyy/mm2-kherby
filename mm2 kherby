@@ -437,6 +437,178 @@ task.spawn(function()
     end
 end)
 
+-- ===== SIMPLE FPS BOOSTER (SINGLE TOGGLE) =====
+local FPSBoosterEnabled = false
+local DisabledAssets = {} -- Store disabled assets for potential restoration (limited)
+
+local function ApplyFPSBooster()
+    if not FPSBoosterEnabled then return end
+    
+    local disabledCount = 0
+    
+    -- Disable Textures
+    for _, v in next, game:GetDescendants() do
+        if v:IsA("Decal") or v:IsA("Texture") then
+            pcall(function()
+                if v.Texture ~= "" then
+                    table.insert(DisabledAssets, {obj = v, prop = "Texture", value = v.Texture})
+                    v.Texture = ""
+                    disabledCount = disabledCount + 1
+                end
+            end)
+        end
+    end
+    
+    -- Disable Visual Effects
+    for _, v in next, game:GetDescendants() do
+        if v:IsA("BloomEffect") or v:IsA("BlurEffect") or v:IsA("DepthOfFieldEffect") or v:IsA("SunRaysEffect") then
+            pcall(function()
+                if v.Enabled then
+                    table.insert(DisabledAssets, {obj = v, prop = "Enabled", value = true})
+                    v.Enabled = false
+                    disabledCount = disabledCount + 1
+                end
+            end)
+        end
+    end
+    
+    -- Optimize Parts
+    for _, v in next, game:GetDescendants() do
+        if v:IsA("Part") or v:IsA("Union") or v:IsA("BasePart") then
+            pcall(function()
+                if v.Material ~= Enum.Material.SmoothPlastic then
+                    table.insert(DisabledAssets, {obj = v, prop = "Material", value = v.Material})
+                    v.Material = Enum.Material.SmoothPlastic
+                    disabledCount = disabledCount + 1
+                end
+            end)
+        end
+    end
+    
+    -- Disable Particles
+    for _, v in next, game:GetDescendants() do
+        if v:IsA("ParticleEmitter") or v:IsA("Smoke") or v:IsA("Explosion") or v:IsA("Sparkles") or v:IsA("Fire") then
+            pcall(function()
+                if v.Enabled then
+                    table.insert(DisabledAssets, {obj = v, prop = "Enabled", value = true})
+                    v.Enabled = false
+                    disabledCount = disabledCount + 1
+                end
+            end)
+        end
+    end
+    
+    -- Remove Sky
+    for _, v in next, game:GetDescendants() do
+        if v:IsA("Sky") then
+            pcall(function()
+                table.insert(DisabledAssets, {obj = v, prop = "Parent", value = v.Parent})
+                v.Parent = nil
+                disabledCount = disabledCount + 1
+            end)
+        end
+    end
+    
+    -- Full Bright
+    local Lighting = game:GetService("Lighting")
+    pcall(function()
+        table.insert(DisabledAssets, {obj = Lighting, prop = "FogColor", value = Lighting.FogColor})
+        table.insert(DisabledAssets, {obj = Lighting, prop = "FogEnd", value = Lighting.FogEnd})
+        table.insert(DisabledAssets, {obj = Lighting, prop = "FogStart", value = Lighting.FogStart})
+        table.insert(DisabledAssets, {obj = Lighting, prop = "Ambient", value = Lighting.Ambient})
+        table.insert(DisabledAssets, {obj = Lighting, prop = "Brightness", value = Lighting.Brightness})
+        table.insert(DisabledAssets, {obj = Lighting, prop = "ColorShift_Bottom", value = Lighting.ColorShift_Bottom})
+        table.insert(DisabledAssets, {obj = Lighting, prop = "ColorShift_Top", value = Lighting.ColorShift_Top})
+        table.insert(DisabledAssets, {obj = Lighting, prop = "OutdoorAmbient", value = Lighting.OutdoorAmbient})
+        table.insert(DisabledAssets, {obj = Lighting, prop = "Outlines", value = Lighting.Outlines})
+        
+        Lighting.FogColor = Color3.fromRGB(255, 255, 255)
+        Lighting.FogEnd = math.huge
+        Lighting.FogStart = math.huge
+        Lighting.Ambient = Color3.fromRGB(255, 255, 255)
+        Lighting.Brightness = 5
+        Lighting.ColorShift_Bottom = Color3.fromRGB(255, 255, 255)
+        Lighting.ColorShift_Top = Color3.fromRGB(255, 255, 255)
+        Lighting.OutdoorAmbient = Color3.fromRGB(255, 255, 255)
+        Lighting.Outlines = true
+    end)
+    
+    Notifier.new({
+        Title = "FPS Booster",
+        Content = "Disabled "..disabledCount.." assets/effects + FullBright",
+        Duration = 3
+    })
+end
+
+local function DisableFPSBooster()
+    -- Restore saved assets
+    for _, asset in ipairs(DisabledAssets) do
+        pcall(function()
+            if asset.obj then
+                if asset.prop == "Parent" then
+                    if asset.value then
+                        asset.obj.Parent = asset.value
+                    end
+                else
+                    asset.obj[asset.prop] = asset.value
+                end
+            end
+        end)
+    end
+    
+    DisabledAssets = {}
+    
+    Notifier.new({
+        Title = "FPS Booster",
+        Content = "Disabled - Graphics restored",
+        Duration = 3
+    })
+end
+
+-- Monitor for new assets and apply FPS booster if enabled
+local descendantConnection = nil
+local function MonitorForNewAssets()
+    if descendantConnection then
+        descendantConnection:Disconnect()
+        descendantConnection = nil
+    end
+    
+    if not FPSBoosterEnabled then return end
+    
+    descendantConnection = game.DescendantAdded:Connect(function(v)
+        if not FPSBoosterEnabled then return end
+        
+        task.wait(0.1)
+        
+        if v:IsA("Decal") or v:IsA("Texture") then
+            pcall(function() v.Texture = "" end)
+        elseif v:IsA("BloomEffect") or v:IsA("BlurEffect") or v:IsA("DepthOfFieldEffect") or v:IsA("SunRaysEffect") then
+            pcall(function() v.Enabled = false end)
+        elseif v:IsA("Part") or v:IsA("Union") or v:IsA("BasePart") then
+            pcall(function() v.Material = Enum.Material.SmoothPlastic end)
+        elseif v:IsA("ParticleEmitter") or v:IsA("Smoke") or v:IsA("Explosion") or v:IsA("Sparkles") or v:IsA("Fire") then
+            pcall(function() v.Enabled = false end)
+        elseif v:IsA("Sky") then
+            pcall(function() v.Parent = nil end)
+        end
+    end)
+end
+
+local function ToggleFPSBooster(enabled)
+    FPSBoosterEnabled = enabled
+    
+    if enabled then
+        ApplyFPSBooster()
+        MonitorForNewAssets()
+    else
+        if descendantConnection then
+            descendantConnection:Disconnect()
+            descendantConnection = nil
+        end
+        DisableFPSBooster()
+    end
+end
+
 -- ===== MM2 FEATURES =====
 local Players = game:GetService("Players")
 local UserInputService = game:GetService("UserInputService")
@@ -546,7 +718,7 @@ local function updateNetworkMetrics()
     NetworkMetrics.lastUpdate = currentTime
 end
 
--- ===== ADVANCED PREDICTION FUNCTIONS (FOR STRAFING & ZIGZAG) =====
+-- ===== ADVANCED PREDICTION FUNCTIONS =====
 local function initPlayerData(player)
     if not PredictionSystem.playerData[player] then
         PredictionSystem.playerData[player] = {
@@ -577,7 +749,6 @@ local function isPlayerJumping(character)
     return false
 end
 
--- Detect strafing direction (left/right movement)
 local function detectStrafeDirection(player, currentVel)
     local data = initPlayerData(player)
     
@@ -585,11 +756,9 @@ local function detectStrafeDirection(player, currentVel)
         return 0
     end
     
-    -- Get previous velocities
     local prevVel = data.velocityHistory[#data.velocityHistory - 1]
     if not prevVel then return 0 end
     
-    -- Calculate horizontal velocity vectors (ignore Y axis)
     local currentHoriz = Vector3.new(currentVel.X, 0, currentVel.Z)
     local prevHoriz = Vector3.new(prevVel.vel.X, 0, prevVel.vel.Z)
     
@@ -597,17 +766,13 @@ local function detectStrafeDirection(player, currentVel)
         return 0
     end
     
-    -- Calculate direction change (cross product to detect left/right)
     local currentDir = currentHoriz.Unit
     local prevDir = prevHoriz.Unit
     
-    -- Cross product Y value indicates left/right turn
     local crossY = prevDir.X * currentDir.Z - prevDir.Z * currentDir.X
     
-    -- Positive = turning right, Negative = turning left
     local strafeDirection = crossY > 0.1 and 1 or (crossY < -0.1 and -1 or 0)
     
-    -- Update strafe timing
     if strafeDirection ~= 0 and strafeDirection ~= data.strafeDirection then
         data.lastStrafeTime = tick()
     end
@@ -616,7 +781,6 @@ local function detectStrafeDirection(player, currentVel)
     return strafeDirection
 end
 
--- Predict position with strafe/zigzag compensation
 local function predictPlayerPositionAdvanced(player, targetPart)
     if not player or not player.Character then
         return targetPart and targetPart.Position or Vector3.new()
@@ -636,7 +800,6 @@ local function predictPlayerPositionAdvanced(player, targetPart)
     local currentPos = hrp.Position
     local currentVel = hrp.Velocity
     
-    -- Store history
     table.insert(data.positionHistory, 1, {pos = currentPos, time = currentTime})
     if #data.positionHistory > 15 then
         table.remove(data.positionHistory)
@@ -647,7 +810,6 @@ local function predictPlayerPositionAdvanced(player, targetPart)
         table.remove(data.velocityHistory)
     end
     
-    -- Store direction history for strafe detection
     if currentVel.Magnitude > 1 then
         local currentDir = currentVel.Unit
         table.insert(data.directionHistory, 1, currentDir)
@@ -660,7 +822,6 @@ local function predictPlayerPositionAdvanced(player, targetPart)
     data.lastVelocity = currentVel
     data.lastTime = currentTime
     
-    -- Determine target part based on jumping state
     local isJumping = isPlayerJumping(character)
     local finalTargetPart
     
@@ -675,76 +836,62 @@ local function predictPlayerPositionAdvanced(player, targetPart)
     local targetPos = chosenPart.Position
     local velocity = chosenPart.AssemblyLinearVelocity or Vector3.new()
     
-    -- Base prediction time
     local basePrediction = NetworkMetrics.RTTBuffer + 0.03
     local speedBonus = math.min(velocity.Magnitude / 2000, 0.08)
     local predictionTime = math.clamp(basePrediction + speedBonus, 0.04, 0.2)
     
-    -- STRAFE/ZIGZAG DETECTION AND COMPENSATION
     local strafeDirection = detectStrafeDirection(player, velocity)
     local isStrafing = math.abs(strafeDirection) > 0
     local isZigzagging = false
     
-    -- Detect zigzag (frequent direction changes)
     if #data.directionHistory >= 5 then
         local directionChanges = 0
         for i = 2, #data.directionHistory do
             local dot = data.directionHistory[i-1]:Dot(data.directionHistory[i])
-            if dot < 0.7 then -- Significant direction change
+            if dot < 0.7 then
                 directionChanges = directionChanges + 1
             end
         end
         isZigzagging = directionChanges >= 3
     end
     
-    -- Start with linear prediction
     local predictedPos = targetPos + (velocity * predictionTime)
     
-    -- Apply gravity for vertical movement
     if velocity.Y ~= 0 then
         local gravity = PredictionSystem.gravity
         local verticalPos = targetPos.Y + (velocity.Y * predictionTime) - (0.5 * gravity * predictionTime * predictionTime)
         predictedPos = Vector3.new(predictedPos.X, verticalPos, predictedPos.Z)
     end
     
-    -- STRAFE COMPENSATION
     if isStrafing and velocity.Magnitude > 8 then
-        -- Predict strafe offset based on direction
         local strafeOffset = 0
         local strafeStrength = math.min(velocity.Magnitude / 50, 2.5)
         
         if strafeDirection > 0 then
-            -- Strafing right - aim slightly ahead in that direction
             local rightVector = chosenPart.CFrame.RightVector
             strafeOffset = strafeStrength * predictionTime * 15
             predictedPos = predictedPos + (rightVector * strafeOffset)
         elseif strafeDirection < 0 then
-            -- Strafing left - aim slightly ahead in that direction
             local leftVector = -chosenPart.CFrame.RightVector
             strafeOffset = strafeStrength * predictionTime * 15
             predictedPos = predictedPos + (leftVector * strafeOffset)
         end
     end
     
-    -- ZIGZAG COMPENSATION (harder to predict, aim more central)
     if isZigzagging then
-        -- When zigzagging, aim more towards center mass and reduce horizontal offset
         predictedPos = Vector3.new(
             predictedPos.X,
-            predictedPos.Y + 0.5, -- Slightly higher for zigzag
+            predictedPos.Y + 0.5,
             predictedPos.Z
         )
-        -- Add small random offset to compensate for erratic movement
         local zigzagFactor = math.sin(tick() * 15) * 0.8
         predictedPos = predictedPos + (chosenPart.CFrame.RightVector * zigzagFactor * 0.5)
     end
     
-    -- Jumping adjustment (aim lower)
     if isJumping then
         predictedPos = Vector3.new(predictedPos.X, predictedPos.Y - 1.8, predictedPos.Z)
     end
     
-    -- Use velocity history for smoothing (reduces jitter)
     if #data.velocityHistory >= 3 then
         local avgVelX = 0
         local avgVelZ = 0
@@ -756,14 +903,12 @@ local function predictPlayerPositionAdvanced(player, targetPart)
         avgVelZ = avgVelZ / 3
         local smoothedVel = Vector3.new(avgVelX, velocity.Y, avgVelZ)
         local smoothedPos = targetPos + (smoothedVel * predictionTime)
-        -- Blend between linear and smoothed (70/30)
         predictedPos = predictedPos * 0.7 + smoothedPos * 0.3
     end
     
     return predictedPos
 end
 
--- Simplified version for functions that don't need advanced prediction
 local function predictPlayerPosition(player, targetPart)
     return predictPlayerPositionAdvanced(player, targetPart)
 end
@@ -1837,7 +1982,6 @@ local function updateAimbot()
     
     if not targetPart then return end
     
-    -- Use advanced prediction for strafing/zigzagging
     local predictedPos = predictPlayerPositionAdvanced(targetPlr, targetPart)
     
     local camera = Workspace.CurrentCamera
@@ -1964,7 +2108,6 @@ local function predictMurdererPosSH(murderer)
     return predictedPos
 end
 
--- FIXED stopSilentHacker function (no "cannot cancel thread" error)
 local function stopSilentHacker()
     State.SilentHacker.isDesyncing = false
     State.SilentHacker.currentTarget = nil
@@ -2809,7 +2952,7 @@ end)
 
 Notifier.new({
     Title = "I Love Annie - MM2 + TRADE + NOCLIP + AUTO FARM",
-    Content = "Trade system + Noclip + Auto Farm running in background | Silent Hacker + Silent Aim Connected! | Advanced Prediction for Strafing/Zigzag!",
+    Content = "Trade system + Noclip + Auto Farm running in background | FPS Booster DISABLED by default | Silent Hacker + Silent Aim Connected! | Advanced Prediction for Strafing/Zigzag!",
     Duration = 8,
     Icon = "rbxassetid://120245531583106"
 });
@@ -3070,10 +3213,11 @@ MurdererHitboxSection:AddKeybind({
     Callback = function(v) State.Hitbox.VisualizerKeybind = v end,
 })
 
-local PlayerTab = Window:DrawTab({ Name = "Player", Icon = "user", EnableScrolling = true })
-local PlayerMovementSection = PlayerTab:DrawSection({ Name = "Movement", Position = 'left' })
+-- ===== MOVEMENT TAB (Renamed from Player) =====
+local MovementTab = Window:DrawTab({ Name = "Movement", Icon = "user", EnableScrolling = true })
+local MovementSpeedSection = MovementTab:DrawSection({ Name = "Speed Boost", Position = 'left' })
 
-PlayerMovementSection:AddToggle({
+MovementSpeedSection:AddToggle({
     Name = "Enable Speed Boost (Hold Shift)",
     Flag = "SpeedBoost_Enabled",
     Default = false,
@@ -3083,10 +3227,77 @@ PlayerMovementSection:AddToggle({
     end,
 })
 
-PlayerMovementSection:AddSlider({
+MovementSpeedSection:AddSlider({
     Name = "Speed Boost Amount",
     Min = 16, Max = 100, Default = 19, Round = 0, Flag = "SpeedBoost_Amount",
     Callback = function(v) State.SpeedBoost.Speed = v end
+})
+
+local MovementAntiFlingSection = MovementTab:DrawSection({ Name = "Anti-Fling", Position = 'left' })
+
+MovementAntiFlingSection:AddToggle({
+    Name = "Enable Anti-Fling",
+    Flag = "AntiFling_Enabled",
+    Default = false,
+    Callback = function(v) 
+        State.AntiFling.Enabled = v
+        if v then
+            setupAntiFling()
+        else
+            disableAntiFling()
+        end
+        Notifier.new({Title="Anti-Fling", Content=v and "ON" or "OFF", Duration=2})
+    end,
+})
+
+local MovementNoclipSection = MovementTab:DrawSection({ Name = "Noclip", Position = 'left' })
+
+MovementNoclipSection:AddToggle({
+    Name = "Enable Noclip",
+    Flag = "Noclip_Enabled",
+    Default = false,
+    Risky = true,
+    Callback = function(v)
+        State.Noclip.Enabled = v
+        if v then
+            setupNoclip()
+            Notifier.new({Title="Noclip", Content="Enabled - Walk through walls!", Duration=2})
+        else
+            disableNoclip()
+            Notifier.new({Title="Noclip", Content="Disabled", Duration=2})
+        end
+    end,
+})
+
+-- ===== FPS BOOSTER TAB (SINGLE TOGGLE) =====
+local FPSBoosterTab = Window:DrawTab({ Name = "FPS Booster", Icon = "cpu", EnableScrolling = true })
+local FPSBoosterSection = FPSBoosterTab:DrawSection({ Name = "Performance Settings", Position = 'left' })
+
+FPSBoosterSection:AddToggle({
+    Name = "Enable FPS Booster (ONE CLICK)",
+    Flag = "FPSBooster_Enabled",
+    Default = false,
+    Callback = function(v)
+        ToggleFPSBooster(v)
+        Notifier.new({Title="FPS Booster", Content=v and "ENABLED - Effects disabled, FullBright ON" or "DISABLED - Graphics restored", Duration=3})
+    end,
+})
+
+FPSBoosterSection:AddParagraph({
+    title = "What this does:",
+    text = "- Disables all Textures (Decals/Textures)\n- Disables Visual Effects (Bloom/Blur)\n- Optimizes Parts (SmoothPlastic material)\n- Disables Particles (Smoke/Fire/Emitters)\n- Removes Skybox\n- Enables FullBright\n- Monitor for new assets and applies automatically",
+})
+
+FPSBoosterSection:AddButton({
+    Name = "Reapply FPS Booster",
+    Callback = function()
+        if FPSBoosterEnabled then
+            ApplyFPSBooster()
+            Notifier.new({Title="FPS Booster", Content="Reapplied all settings", Duration=2})
+        else
+            Notifier.new({Title="FPS Booster", Content="Enable FPS Booster first", Duration=2})
+        end
+    end,
 })
 
 local ExploitTab = Window:DrawTab({ Name = "Exploit", Icon = "skull", EnableScrolling = true })
@@ -3109,38 +3320,6 @@ ExploitSurvivalSection:AddKeybind({
     Default = "G",
     Flag = "GodMode_Keybind",
     Callback = function(v) State.GodMode.Keybind = v end,
-})
-
-ExploitSurvivalSection:AddToggle({
-    Name = "Enable Anti-Fling",
-    Flag = "AntiFling_Enabled",
-    Default = false,
-    Callback = function(v) 
-        State.AntiFling.Enabled = v
-        if v then
-            setupAntiFling()
-        else
-            disableAntiFling()
-        end
-        Notifier.new({Title="Anti-Fling", Content=v and "ON" or "OFF", Duration=2})
-    end,
-})
-
-ExploitSurvivalSection:AddToggle({
-    Name = "Enable Noclip",
-    Flag = "Noclip_Enabled",
-    Default = false,
-    Risky = true,
-    Callback = function(v)
-        State.Noclip.Enabled = v
-        if v then
-            setupNoclip()
-            Notifier.new({Title="Noclip", Content="Enabled - Walk through walls!", Duration=2})
-        else
-            disableNoclip()
-            Notifier.new({Title="Noclip", Content="Disabled", Duration=2})
-        end
-    end,
 })
 
 local ExploitDesyncSection = ExploitTab:DrawSection({ Name = "Desync", Position = 'left' })
@@ -3489,7 +3668,7 @@ task.spawn(function()
     Compkiller:SetTheme("Dark Blue")
     Notifier.new({
         Title = "Theme Applied",
-        Content = "Dark Blue theme loaded! Trade system + Noclip + Auto Farm active in background.",
+        Content = "Dark Blue theme loaded!",
         Duration = 4,
         Icon = "paint-brush"
     })
@@ -3497,6 +3676,6 @@ end)
 
 Notifier.new({
     Title = "MM2",
-    Content = "loaded - Auto Farm added! Advanced strafe/zigzag prediction!",
+    Content = "Loaded",
     Duration = 6
 })
