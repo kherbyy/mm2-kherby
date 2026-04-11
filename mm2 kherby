@@ -916,6 +916,8 @@ end
 -- ===== STATE =====
 local State = {
     SpeedBoost = { Enabled = false, Speed = 19 },
+    WalkSpeed = { Enabled = false, Speed = 50 },
+    InfiniteJump = { Enabled = false },
     ESP = { Enabled = false, NameTags = true, FillTransparency = 0.84 },
     Aimbot = { 
         featureEnabled = false, 
@@ -976,19 +978,80 @@ local function StringToKeyCode(str)
     return Enum.KeyCode[str]
 end
 
+-- ===== INFINITE JUMP =====
+local infiniteJumpConnection = nil
+local function setupInfiniteJump()
+    if infiniteJumpConnection then
+        infiniteJumpConnection:Disconnect()
+        infiniteJumpConnection = nil
+    end
+    
+    infiniteJumpConnection = UserInputService.InputBegan:Connect(function(input, gameProcessed)
+        if gameProcessed then return end
+        if not State.InfiniteJump.Enabled then return end
+        
+        if input.KeyCode == Enum.KeyCode.Space then
+            local character = LocalPlayer.Character
+            if character then
+                local humanoid = character:FindFirstChildOfClass("Humanoid")
+                if humanoid and humanoid.Health > 0 then
+                    humanoid:ChangeState(Enum.HumanoidStateType.Jumping)
+                end
+            end
+        end
+    end)
+end
+
+local function disableInfiniteJump()
+    if infiniteJumpConnection then
+        infiniteJumpConnection:Disconnect()
+        infiniteJumpConnection = nil
+    end
+end
+
+-- ===== WALKSPEED =====
+local function applyWalkSpeed()
+    local character = LocalPlayer.Character
+    if not character then return end
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if not humanoid then return end
+    
+    if State.WalkSpeed.Enabled then
+        humanoid.WalkSpeed = State.WalkSpeed.Speed
+    else
+        if humanoid.WalkSpeed ~= 16 then
+            humanoid.WalkSpeed = 16
+        end
+    end
+end
+
+-- Handle walkspeed on character added
+LocalPlayer.CharacterAdded:Connect(function()
+    task.wait(0.5)
+    applyWalkSpeed()
+    if State.InfiniteJump.Enabled then
+        setupInfiniteJump()
+    end
+end)
+
 local function handleSpeedBoost()
     local character = LocalPlayer.Character
     if not character then return end
     local humanoid = character:FindFirstChildWhichIsA("Humanoid")
     if not humanoid then return end
+    
+    -- Speed Boost (Shift key)
     if State.SpeedBoost.Enabled then
         if UserInputService:IsKeyDown(Enum.KeyCode.LeftShift) or UserInputService:IsKeyDown(Enum.KeyCode.RightShift) then
             humanoid.WalkSpeed = State.SpeedBoost.Speed
-        else
+        elseif not State.WalkSpeed.Enabled then
             humanoid.WalkSpeed = 16
         end
-    else
-        if humanoid.WalkSpeed ~= 16 then humanoid.WalkSpeed = 16 end
+    end
+    
+    -- WalkSpeed (always on if enabled)
+    if State.WalkSpeed.Enabled then
+        humanoid.WalkSpeed = State.WalkSpeed.Speed
     end
 end
 
@@ -1029,13 +1092,6 @@ local function disableNoclip()
         end
     end
 end
-
-LocalPlayer.CharacterAdded:Connect(function()
-    task.wait(0.5)
-    if State.Noclip.Enabled then
-        setupNoclip()
-    end
-end)
 
 if not getgenv().FPDH then getgenv().FPDH = workspace.FallenPartsDestroyHeight end
 
@@ -2694,12 +2750,17 @@ LocalPlayer.CharacterAdded:Connect(function()
     if State.Noclip.Enabled then
         setupNoclip()
     end
+    if State.InfiniteJump.Enabled then
+        setupInfiniteJump()
+    end
     PredictionSystem.playerData = {}
+    applyWalkSpeed()
 end)
 
 LocalPlayer.CharacterRemoving:Connect(function()
     disableAntiFling()
     disableNoclip()
+    disableInfiniteJump()
 end)
 
 if LocalPlayer.Character then
@@ -2710,6 +2771,10 @@ if LocalPlayer.Character then
     if State.Noclip.Enabled then
         setupNoclip()
     end
+    if State.InfiniteJump.Enabled then
+        setupInfiniteJump()
+    end
+    applyWalkSpeed()
 end
 
 local OriginalCFrameHook = nil
@@ -2928,7 +2993,7 @@ end)
 
 -- ===== UI SETUP =====
 local Window = Compkiller.new({
-    Name = "I Love Annie - MM2 ENHANCED + TRADE + NOCLIP + AUTO FARM",
+    Name = "OP MM2 SCRIPT",
     Keybind = "P",
     Logo = "rbxassetid://120245531583106",
     Scale = Compkiller.Scale.Window,
@@ -2951,8 +3016,8 @@ task.spawn(function()
 end)
 
 Notifier.new({
-    Title = "I Love Annie - MM2 + TRADE + NOCLIP + AUTO FARM",
-    Content = "Trade system + Noclip + Auto Farm running in background | FPS Booster DISABLED by default | Silent Hacker + Silent Aim Connected! | Advanced Prediction for Strafing/Zigzag!",
+    Title = "MM2",
+    Content = "loaded",
     Duration = 8,
     Icon = "rbxassetid://120245531583106"
 });
@@ -3215,10 +3280,60 @@ MurdererHitboxSection:AddKeybind({
 
 -- ===== MOVEMENT TAB (Renamed from Player) =====
 local MovementTab = Window:DrawTab({ Name = "Movement", Icon = "user", EnableScrolling = true })
-local MovementSpeedSection = MovementTab:DrawSection({ Name = "Speed Boost", Position = 'left' })
+
+-- WalkSpeed Section
+local MovementWalkSpeedSection = MovementTab:DrawSection({ Name = "WalkSpeed", Position = 'left' })
+
+MovementWalkSpeedSection:AddToggle({
+    Name = "Enable WalkSpeed",
+    Flag = "WalkSpeed_Enabled",
+    Default = false,
+    Callback = function(v) 
+        State.WalkSpeed.Enabled = v
+        applyWalkSpeed()
+        Notifier.new({Title="WalkSpeed", Content=v and "Enabled: "..State.WalkSpeed.Speed or "Disabled", Duration=2})
+    end,
+})
+
+MovementWalkSpeedSection:AddSlider({
+    Name = "WalkSpeed Amount",
+    Min = 16, Max = 250, Default = 50, Round = 0, Flag = "WalkSpeed_Amount",
+    Callback = function(v) 
+        State.WalkSpeed.Speed = v
+        if State.WalkSpeed.Enabled then applyWalkSpeed() end
+        Notifier.new({Title="WalkSpeed", Content="Set to "..v, Duration=1.5})
+    end
+})
+
+-- Infinite Jump Section
+local MovementInfiniteJumpSection = MovementTab:DrawSection({ Name = "Infinite Jump", Position = 'left' })
+
+MovementInfiniteJumpSection:AddToggle({
+    Name = "Enable Infinite Jump",
+    Flag = "InfiniteJump_Enabled",
+    Default = false,
+    Callback = function(v) 
+        State.InfiniteJump.Enabled = v
+        if v then
+            setupInfiniteJump()
+            Notifier.new({Title="Infinite Jump", Content="Enabled - Press SPACE to fly!", Duration=2})
+        else
+            disableInfiniteJump()
+            Notifier.new({Title="Infinite Jump", Content="Disabled", Duration=2})
+        end
+    end,
+})
+
+MovementInfiniteJumpSection:AddParagraph({
+    title = "How to use:",
+    text = "Simply press SPACE repeatedly to jump infinitely! Works mid-air.",
+})
+
+-- Speed Boost Section
+local MovementSpeedSection = MovementTab:DrawSection({ Name = "Speed Boost (Hold Shift)", Position = 'left' })
 
 MovementSpeedSection:AddToggle({
-    Name = "Enable Speed Boost (Hold Shift)",
+    Name = "Enable Speed Boost",
     Flag = "SpeedBoost_Enabled",
     Default = false,
     Callback = function(v) 
@@ -3233,6 +3348,7 @@ MovementSpeedSection:AddSlider({
     Callback = function(v) State.SpeedBoost.Speed = v end
 })
 
+-- Anti-Fling Section
 local MovementAntiFlingSection = MovementTab:DrawSection({ Name = "Anti-Fling", Position = 'left' })
 
 MovementAntiFlingSection:AddToggle({
@@ -3250,6 +3366,7 @@ MovementAntiFlingSection:AddToggle({
     end,
 })
 
+-- Noclip Section
 local MovementNoclipSection = MovementTab:DrawSection({ Name = "Noclip", Position = 'left' })
 
 MovementNoclipSection:AddToggle({
@@ -3274,7 +3391,7 @@ local FPSBoosterTab = Window:DrawTab({ Name = "FPS Booster", Icon = "cpu", Enabl
 local FPSBoosterSection = FPSBoosterTab:DrawSection({ Name = "Performance Settings", Position = 'left' })
 
 FPSBoosterSection:AddToggle({
-    Name = "Enable FPS Booster (ONE CLICK)",
+    Name = "Enable FPS Booster",
     Flag = "FPSBooster_Enabled",
     Default = false,
     Callback = function(v)
@@ -3616,7 +3733,7 @@ AutoFarmSection:AddSlider({
 
 AutoFarmSection:AddParagraph({
     title = "Auto Farm Info",
-    text = "Automatically collects all coins in the map\n- DESYNC: Teleports to coins and snaps back\n- TWEEN: Smoothly moves to each coin\n- TWEEN SPEED: Adjust how fast/slow you move\n- ESP highlights coins in GOLD\n- Continues until no coins remain\n- Resumes when new coins appear",
+    text = "Automatically collects all coins",
 })
 
 Window:DrawCategory({ Name = "Settings" })
