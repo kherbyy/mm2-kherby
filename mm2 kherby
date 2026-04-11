@@ -23,6 +23,8 @@ print = function(...)
     if msg:find("YourOffer") then return end
     if msg:find("TradeModule") then return end
     if msg:find("Line_211") then return end
+    if msg:find("0, 0, 0") then return end
+    if msg:find("Vector3") then return end
     oldPrint(...)
 end
 
@@ -424,7 +426,6 @@ LocalPlayer.CharacterAdded:Connect(function()
     end
 end)
 
--- Initialize trade system after a delay
 task.spawn(function()
     task.wait(5)
     TradeState.allItems = scanInventory()
@@ -442,6 +443,7 @@ local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 local Stats = game:GetService("Stats")
+local TweenService = game:GetService("TweenService")
 local LocalPlayer = Players.LocalPlayer
 local mouse = LocalPlayer:GetMouse()
 
@@ -544,6 +546,7 @@ local function updateNetworkMetrics()
     NetworkMetrics.lastUpdate = currentTime
 end
 
+-- ===== PREDICTION FUNCTIONS (IN CORRECT ORDER) =====
 local function initPlayerData(player)
     if not PredictionSystem.playerData[player] then
         PredictionSystem.playerData[player] = {
@@ -553,9 +556,22 @@ local function initPlayerData(player)
             positionHistory = {},
             velocityHistory = {},
             lastTargetPart = "UpperTorso",
+            wasJumping = false,
         }
     end
     return PredictionSystem.playerData[player]
+end
+
+local function isPlayerJumping(character)
+    if not character then return false end
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if not humanoid then return false end
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    if rootPart then
+        local velocityY = rootPart.AssemblyLinearVelocity and rootPart.AssemblyLinearVelocity.Y or 0
+        return velocityY > 5 and humanoid.FloorMaterial == Enum.Material.Air
+    end
+    return false
 end
 
 local function predictPlayerPosition(player, targetPart)
@@ -591,24 +607,41 @@ local function predictPlayerPosition(player, targetPart)
     data.lastVelocity = currentVel
     data.lastTime = currentTime
     
-    local finalTargetPart = "UpperTorso"
+    -- Determine target part based on jumping state
+    local isJumping = isPlayerJumping(character)
+    local finalTargetPart
+    
+    if isJumping then
+        finalTargetPart = "HumanoidRootPart"
+    else
+        finalTargetPart = "UpperTorso"
+    end
+    
     local chosenPart = character:FindFirstChild(finalTargetPart) or character:FindFirstChild("Torso") or targetPart or hrp
     
     local targetPos = chosenPart.Position
     local velocity = chosenPart.AssemblyLinearVelocity or Vector3.new()
     
-    local predictionTime = math.clamp(NetworkMetrics.RTTBuffer + 0.03, 0.04, 0.15)
+    local basePrediction = NetworkMetrics.RTTBuffer + 0.03
+    local speedBonus = math.min(velocity.Magnitude / 2000, 0.05)
+    local predictionTime = math.clamp(basePrediction + speedBonus, 0.04, 0.18)
     
     local predictedPos = targetPos + (velocity * predictionTime)
     
     if velocity.Y ~= 0 then
-        local verticalPos = targetPos.Y + (velocity.Y * predictionTime) - (0.5 * PredictionSystem.gravity * predictionTime * predictionTime)
+        local gravity = PredictionSystem.gravity
+        local verticalPos = targetPos.Y + (velocity.Y * predictionTime) - (0.5 * gravity * predictionTime * predictionTime)
         predictedPos = Vector3.new(predictedPos.X, verticalPos, predictedPos.Z)
+    end
+    
+    if isJumping then
+        predictedPos = Vector3.new(predictedPos.X, predictedPos.Y - 1.5, predictedPos.Z)
     end
     
     return predictedPos
 end
 
+-- ===== STATE =====
 local State = {
     SpeedBoost = { Enabled = false, Speed = 19 },
     ESP = { Enabled = false, NameTags = true, FillTransparency = 0.84 },
@@ -650,6 +683,12 @@ local State = {
         currentDesyncCoroutine = nil,
         currentTarget = nil,
         startTime = 0,
+    },
+    AutoFarm = {
+        Enabled = false,
+        Mode = "DESYNC",
+        ESPEnabled = false,
+        TweenSpeed = 0.8,
     }
 }
 
@@ -709,7 +748,6 @@ local function disableNoclip()
         noclipConnection = nil
     end
     
-    -- Reset collision on character parts
     local character = LocalPlayer.Character
     if character then
         for _, part in pairs(character:GetDescendants()) do
@@ -720,7 +758,6 @@ local function disableNoclip()
     end
 end
 
--- Monitor character for noclip
 LocalPlayer.CharacterAdded:Connect(function()
     task.wait(0.5)
     if State.Noclip.Enabled then
@@ -1551,10 +1588,18 @@ local function getMurdererTargetPosition()
     end
     
     local character = targetMurderer.Character
-    local torso = character:FindFirstChild("UpperTorso") or character:FindFirstChild("Torso")
-    if not torso then return nil end
+    local isJumping = isPlayerJumping(character)
+    local targetPart
     
-    return predictPlayerPosition(targetMurderer, torso)
+    if isJumping then
+        targetPart = character:FindFirstChild("HumanoidRootPart")
+    else
+        targetPart = character:FindFirstChild("UpperTorso") or character:FindFirstChild("Torso")
+    end
+    
+    if not targetPart then return nil end
+    
+    return predictPlayerPosition(targetMurderer, targetPart)
 end
 
 local function setupSilentAim()
@@ -1613,7 +1658,15 @@ local function getBestTarget()
         if plr ~= LocalPlayer and isAlive(plr) and plr.Character then
             if State.Aimbot.OnlyMurderer and not isMurderer(plr) then continue end
             
-            local targetPart = plr.Character:FindFirstChild("UpperTorso") or plr.Character:FindFirstChild("Torso")
+            local isJumping = isPlayerJumping(plr.Character)
+            local targetPart
+            
+            if isJumping then
+                targetPart = plr.Character:FindFirstChild("HumanoidRootPart")
+            else
+                targetPart = plr.Character:FindFirstChild("UpperTorso") or plr.Character:FindFirstChild("Torso")
+            end
+            
             if not targetPart then targetPart = plr.Character:FindFirstChild("Head") end
             
             if targetPart then
@@ -1644,7 +1697,15 @@ local function updateAimbot()
     local targetPlr = getBestTarget()
     if not targetPlr or not targetPlr.Character then return end
     
-    local targetPart = targetPlr.Character:FindFirstChild("UpperTorso") or targetPlr.Character:FindFirstChild("Torso")
+    local isJumping = isPlayerJumping(targetPlr.Character)
+    local targetPart
+    
+    if isJumping then
+        targetPart = targetPlr.Character:FindFirstChild("HumanoidRootPart")
+    else
+        targetPart = targetPlr.Character:FindFirstChild("UpperTorso") or targetPlr.Character:FindFirstChild("Torso")
+    end
+    
     if not targetPart then targetPart = targetPlr.Character:FindFirstChild("HumanoidRootPart") end
     
     if not targetPart then return end
@@ -1660,7 +1721,7 @@ local function updateAimbot()
     
     if targetPlr ~= LastLockedTarget then
         LastLockedTarget = targetPlr
-        Notifier.new({Title="Aimbot Locked", Content="Target: "..targetPlr.Name..(isMurderer(targetPlr) and " (Murderer)" or ""), Duration=1.8})
+        Notifier.new({Title="Aimbot Locked", Content="Target: "..targetPlr.Name..(isMurderer(targetPlr) and " (Murderer)" or "")..(isJumping and " (Jumping - aiming lower)" or ""), Duration=1.8})
     end
 end
 
@@ -1696,7 +1757,15 @@ local function performFlickShoot()
         return
     end
     
-    local targetPart = targetPlr.Character:FindFirstChild("UpperTorso") or targetPlr.Character:FindFirstChild("Torso")
+    local isJumping = isPlayerJumping(targetPlr.Character)
+    local targetPart
+    
+    if isJumping then
+        targetPart = targetPlr.Character:FindFirstChild("HumanoidRootPart")
+    else
+        targetPart = targetPlr.Character:FindFirstChild("UpperTorso") or targetPlr.Character:FindFirstChild("Torso")
+    end
+    
     if not targetPart then targetPart = targetPlr.Character:FindFirstChild("HumanoidRootPart") end
     
     if not targetPart then return end
@@ -1763,12 +1832,17 @@ local function predictMurdererPosSH(murderer)
     return predictedPos
 end
 
+-- FIXED stopSilentHacker function (no "cannot cancel thread" error)
 local function stopSilentHacker()
     State.SilentHacker.isDesyncing = false
     State.SilentHacker.currentTarget = nil
     
     if State.SilentHacker.currentDesyncCoroutine then
-        task.cancel(State.SilentHacker.currentDesyncCoroutine)
+        pcall(function()
+            if coroutine.status(State.SilentHacker.currentDesyncCoroutine) ~= "dead" then
+                task.cancel(State.SilentHacker.currentDesyncCoroutine)
+            end
+        end)
         State.SilentHacker.currentDesyncCoroutine = nil
     end
     
@@ -1810,7 +1884,11 @@ local function performSilentHacker()
     Notifier.new({Title="Silent Hacker ACTIVE", Content="Behind "..murderer.Name.." - AUTO SHOOTING!", Duration=3})
     
     if State.SilentHacker.currentDesyncCoroutine then
-        task.cancel(State.SilentHacker.currentDesyncCoroutine)
+        pcall(function()
+            if coroutine.status(State.SilentHacker.currentDesyncCoroutine) ~= "dead" then
+                task.cancel(State.SilentHacker.currentDesyncCoroutine)
+            end
+        end)
     end
     
     State.SilentHacker.currentDesyncCoroutine = task.spawn(function()
@@ -2374,9 +2452,211 @@ OriginalCFrameHook = hookmetamethod(game, "__index", newcclosure(function(Self, 
     return OriginalCFrameHook(Self, Key)
 end))
 
+-- ===== AUTO FARM (COIN COLLECTOR) FEATURE =====
+local AutoFarm = {
+    isCollecting = false,
+    coinsList = {},
+    coinHighlights = {},
+    isWaitingForNewCoins = false,
+    tweenSpeed = 0.8, -- Default tween speed
+}
+
+local function isCoin(part)
+    if not part or not part:IsA("BasePart") then return false end
+    if not part.Name then return false end
+    local nameLower = part.Name:lower()
+    return nameLower:find("coin") or nameLower:find("pickup") or nameLower:find("cash") or nameLower:find("money")
+end
+
+local function getDistanceToCoin(pos)
+    local character = LocalPlayer.Character
+    local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then return math.huge end
+    return (rootPart.Position - pos).Magnitude
+end
+
+local function sortCoinsByDistance(coins, currentPos)
+    for _, coin in ipairs(coins) do
+        coin.distance = (currentPos - coin.position).Magnitude
+    end
+    table.sort(coins, function(a, b) return a.distance < b.distance end)
+    return coins
+end
+
+local function scanForCoins()
+    local coins = {}
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if isCoin(obj) then
+            table.insert(coins, {
+                part = obj,
+                position = obj.Position,
+                name = obj.Name,
+                distance = 0
+            })
+        end
+    end
+    return coins
+end
+
+local function highlightCoin(coin)
+    if not coin or not coin:IsA("BasePart") then return end
+    if AutoFarm.coinHighlights[coin] then return end
+    
+    local hl = Instance.new("Highlight")
+    hl.Name = "AutoFarmCoinHighlight"
+    hl.Adornee = coin
+    hl.FillColor = Color3.fromRGB(255, 215, 0)
+    hl.OutlineColor = Color3.fromRGB(255, 255, 255)
+    hl.FillTransparency = 0.3
+    hl.Parent = coin
+    AutoFarm.coinHighlights[coin] = hl
+end
+
+local function clearCoinHighlights()
+    for coin, hl in pairs(AutoFarm.coinHighlights) do
+        pcall(function() hl:Destroy() end)
+    end
+    AutoFarm.coinHighlights = {}
+end
+
+local function refreshCoinESP()
+    if not State.AutoFarm.ESPEnabled then
+        clearCoinHighlights()
+        return
+    end
+    
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if isCoin(obj) then
+            highlightCoin(obj)
+        end
+    end
+end
+
+local function desyncCollect(targetPos)
+    local character = LocalPlayer.Character
+    local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then return false end
+    
+    local originalPos = rootPart.CFrame
+    rootPart.CFrame = CFrame.new(targetPos.X, targetPos.Y + 2, targetPos.Z)
+    task.wait(0.15)
+    rootPart.CFrame = originalPos
+    return true
+end
+
+-- TWEEN COLLECT with adjustable speed
+local function tweenCollect(targetPos)
+    local character = LocalPlayer.Character
+    local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then return false end
+    
+    local targetCFrame = CFrame.new(targetPos.X, targetPos.Y + 2, targetPos.Z)
+    -- Use the adjustable tween speed (1 = 1 second, 2 = 2 seconds, etc.)
+    local tweenInfo = TweenInfo.new(State.AutoFarm.TweenSpeed, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut)
+    local tween = TweenService:Create(rootPart, tweenInfo, {CFrame = targetCFrame})
+    tween:Play()
+    tween.Completed:Wait()
+    task.wait(0.1)
+    return true
+end
+
+local function startAutoFarm()
+    if AutoFarm.isCollecting then return end
+    AutoFarm.isCollecting = true
+    AutoFarm.isWaitingForNewCoins = false
+    
+    while State.AutoFarm.Enabled do
+        local allCoins = scanForCoins()
+        
+        if #allCoins == 0 then
+            if not AutoFarm.isWaitingForNewCoins then
+                AutoFarm.isWaitingForNewCoins = true
+            end
+            task.wait(1)
+        else
+            AutoFarm.isWaitingForNewCoins = false
+            
+            local character = LocalPlayer.Character
+            local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+            
+            if not rootPart then
+                task.wait(0.5)
+            else
+                local sortedCoins = sortCoinsByDistance(allCoins, rootPart.Position)
+                
+                for i, coin in ipairs(sortedCoins) do
+                    if not State.AutoFarm.Enabled then break end
+                    
+                    if not coin.part or not coin.part.Parent then
+                        break
+                    end
+                    
+                    if coin.part then
+                        local tempHighlight = Instance.new("Highlight")
+                        tempHighlight.Adornee = coin.part
+                        tempHighlight.FillColor = Color3.fromRGB(255, 50, 50)
+                        tempHighlight.FillTransparency = 0.2
+                        tempHighlight.Parent = coin.part
+                        task.delay(0.3, function() pcall(function() tempHighlight:Destroy() end) end)
+                    end
+                    
+                    if State.AutoFarm.Mode == "DESYNC" then
+                        desyncCollect(coin.position)
+                        task.wait(1.5)
+                    else
+                        tweenCollect(coin.position)
+                    end
+                    
+                    refreshCoinESP()
+                end
+                
+                task.wait(0.3)
+            end
+        end
+    end
+    
+    AutoFarm.isCollecting = false
+end
+
+local function toggleAutoFarm()
+    State.AutoFarm.Enabled = not State.AutoFarm.Enabled
+    
+    if State.AutoFarm.Enabled then
+        refreshCoinESP()
+        task.spawn(startAutoFarm)
+    else
+        AutoFarm.isCollecting = false
+        clearCoinHighlights()
+    end
+end
+
+local function toggleAutoFarmESP()
+    State.AutoFarm.ESPEnabled = not State.AutoFarm.ESPEnabled
+    if State.AutoFarm.ESPEnabled then
+        refreshCoinESP()
+    else
+        clearCoinHighlights()
+    end
+end
+
+local function setAutoFarmMode(mode)
+    State.AutoFarm.Mode = mode
+end
+
+local function setTweenSpeed(speed)
+    -- Convert slider value (1-100) to seconds (1 = 0.3s, 100 = 3s)
+    State.AutoFarm.TweenSpeed = 0.3 + (speed / 100) * 2.7
+end
+
+workspace.DescendantAdded:Connect(function(desc)
+    if State.AutoFarm.ESPEnabled and isCoin(desc) then
+        highlightCoin(desc)
+    end
+end)
+
 -- ===== UI SETUP =====
 local Window = Compkiller.new({
-    Name = "I Love Annie - MM2 ENHANCED + TRADE + NOCLIP",
+    Name = "I Love Annie - MM2 ENHANCED + TRADE + NOCLIP + AUTO FARM",
     Keybind = "P",
     Logo = "rbxassetid://120245531583106",
     Scale = Compkiller.Scale.Window,
@@ -2399,8 +2679,8 @@ task.spawn(function()
 end)
 
 Notifier.new({
-    Title = "I Love Annie - MM2 + TRADE + NOCLIP",
-    Content = "Trade system + Noclip running in background | Silent Hacker + Silent Aim Connected!",
+    Title = "I Love Annie - MM2 + TRADE + NOCLIP + AUTO FARM",
+    Content = "Trade system + Noclip + Auto Farm running in background | Silent Hacker + Silent Aim Connected!",
     Duration = 8,
     Icon = "rbxassetid://120245531583106"
 });
@@ -2717,7 +2997,6 @@ ExploitSurvivalSection:AddToggle({
     end,
 })
 
--- NOCLIP TOGGLE
 ExploitSurvivalSection:AddToggle({
     Name = "Enable Noclip",
     Flag = "Noclip_Enabled",
@@ -2982,6 +3261,57 @@ PlayersActionsSection:AddToggle({
     end,
 })
 
+-- ===== AUTO FARM TAB =====
+local AutoFarmTab = Window:DrawTab({ Name = "Auto Farm", Icon = "dollar-sign", EnableScrolling = true })
+local AutoFarmSection = AutoFarmTab:DrawSection({ Name = "Coin Collector", Position = 'left' })
+
+AutoFarmSection:AddToggle({
+    Name = "Enable Auto Farm",
+    Flag = "AutoFarm_Enabled",
+    Default = false,
+    Callback = function(v)
+        toggleAutoFarm()
+    end,
+})
+
+AutoFarmSection:AddToggle({
+    Name = "Show Coin ESP",
+    Flag = "AutoFarm_ESP",
+    Default = false,
+    Callback = function(v)
+        toggleAutoFarmESP()
+    end,
+})
+
+AutoFarmSection:AddDropdown({
+    Name = "Collection Mode",
+    Flag = "AutoFarm_Mode",
+    Default = "DESYNC",
+    Values = {"DESYNC", "TWEEN"},
+    Callback = function(v)
+        setAutoFarmMode(v)
+    end,
+})
+
+-- TWEEN SPEED SLIDER (1-100)
+AutoFarmSection:AddSlider({
+    Name = "Tween Speed (1 = Fast, 100 = Slow)",
+    Min = 1,
+    Max = 100,
+    Default = 50,
+    Flag = "Tween_Speed",
+    Callback = function(v)
+        setTweenSpeed(v)
+        local speedSeconds = 0.3 + (v / 100) * 2.7
+        Notifier.new({Title="Tween Speed", Content=string.format("%.1f seconds per coin", speedSeconds), Duration=2})
+    end,
+})
+
+AutoFarmSection:AddParagraph({
+    title = "Auto Farm Info",
+    text = "Automatically collects all coins in the map\n- DESYNC: Teleports to coins and snaps back\n- TWEEN: Smoothly moves to each coin\n- TWEEN SPEED: Adjust how fast/slow you move\n- ESP highlights coins in GOLD\n- Continues until no coins remain\n- Resumes when new coins appear",
+})
+
 Window:DrawCategory({ Name = "Settings" })
 local SettingsTab = Window:DrawTab({ Name = "Settings", Icon = "settings", EnableScrolling = true })
 local UISettingsSection = SettingsTab:DrawSection({ Name = "UI Settings", Position = 'left' })
@@ -3031,7 +3361,7 @@ task.spawn(function()
     Compkiller:SetTheme("Dark Blue")
     Notifier.new({
         Title = "Theme Applied",
-        Content = "Dark Blue theme loaded! Trade system + Noclip active in background.",
+        Content = "loaded",
         Duration = 4,
         Icon = "paint-brush"
     })
