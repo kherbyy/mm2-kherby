@@ -23,6 +23,8 @@ print = function(...)
     if msg:find("YourOffer") then return end
     if msg:find("TradeModule") then return end
     if msg:find("Line_211") then return end
+    if msg:find("0, 0, 0") then return end
+    if msg:find("Vector3") then return end
     oldPrint(...)
 end
 
@@ -441,6 +443,7 @@ local UserInputService = game:GetService("UserInputService")
 local RunService = game:GetService("RunService")
 local Workspace = game:GetService("Workspace")
 local Stats = game:GetService("Stats")
+local TweenService = game:GetService("TweenService")
 local LocalPlayer = Players.LocalPlayer
 local mouse = LocalPlayer:GetMouse()
 
@@ -543,6 +546,7 @@ local function updateNetworkMetrics()
     NetworkMetrics.lastUpdate = currentTime
 end
 
+-- ===== ADVANCED PREDICTION FUNCTIONS (FOR STRAFING & ZIGZAG) =====
 local function initPlayerData(player)
     if not PredictionSystem.playerData[player] then
         PredictionSystem.playerData[player] = {
@@ -551,13 +555,69 @@ local function initPlayerData(player)
             lastTime = tick(),
             positionHistory = {},
             velocityHistory = {},
+            directionHistory = {},
             lastTargetPart = "UpperTorso",
+            wasJumping = false,
+            strafeDirection = 0,
+            lastStrafeTime = 0,
         }
     end
     return PredictionSystem.playerData[player]
 end
 
-local function predictPlayerPosition(player, targetPart)
+local function isPlayerJumping(character)
+    if not character then return false end
+    local humanoid = character:FindFirstChildOfClass("Humanoid")
+    if not humanoid then return false end
+    local rootPart = character:FindFirstChild("HumanoidRootPart")
+    if rootPart then
+        local velocityY = rootPart.AssemblyLinearVelocity and rootPart.AssemblyLinearVelocity.Y or 0
+        return velocityY > 5 and humanoid.FloorMaterial == Enum.Material.Air
+    end
+    return false
+end
+
+-- Detect strafing direction (left/right movement)
+local function detectStrafeDirection(player, currentVel)
+    local data = initPlayerData(player)
+    
+    if #data.velocityHistory < 3 then
+        return 0
+    end
+    
+    -- Get previous velocities
+    local prevVel = data.velocityHistory[#data.velocityHistory - 1]
+    if not prevVel then return 0 end
+    
+    -- Calculate horizontal velocity vectors (ignore Y axis)
+    local currentHoriz = Vector3.new(currentVel.X, 0, currentVel.Z)
+    local prevHoriz = Vector3.new(prevVel.vel.X, 0, prevVel.vel.Z)
+    
+    if currentHoriz.Magnitude < 5 or prevHoriz.Magnitude < 5 then
+        return 0
+    end
+    
+    -- Calculate direction change (cross product to detect left/right)
+    local currentDir = currentHoriz.Unit
+    local prevDir = prevHoriz.Unit
+    
+    -- Cross product Y value indicates left/right turn
+    local crossY = prevDir.X * currentDir.Z - prevDir.Z * currentDir.X
+    
+    -- Positive = turning right, Negative = turning left
+    local strafeDirection = crossY > 0.1 and 1 or (crossY < -0.1 and -1 or 0)
+    
+    -- Update strafe timing
+    if strafeDirection ~= 0 and strafeDirection ~= data.strafeDirection then
+        data.lastStrafeTime = tick()
+    end
+    data.strafeDirection = strafeDirection
+    
+    return strafeDirection
+end
+
+-- Predict position with strafe/zigzag compensation
+local function predictPlayerPositionAdvanced(player, targetPart)
     if not player or not player.Character then
         return targetPart and targetPart.Position or Vector3.new()
     end
@@ -576,38 +636,139 @@ local function predictPlayerPosition(player, targetPart)
     local currentPos = hrp.Position
     local currentVel = hrp.Velocity
     
+    -- Store history
     table.insert(data.positionHistory, 1, {pos = currentPos, time = currentTime})
-    if #data.positionHistory > 10 then
+    if #data.positionHistory > 15 then
         table.remove(data.positionHistory)
     end
     
     table.insert(data.velocityHistory, 1, {vel = currentVel, time = currentTime})
-    if #data.velocityHistory > 10 then
+    if #data.velocityHistory > 15 then
         table.remove(data.velocityHistory)
+    end
+    
+    -- Store direction history for strafe detection
+    if currentVel.Magnitude > 1 then
+        local currentDir = currentVel.Unit
+        table.insert(data.directionHistory, 1, currentDir)
+        if #data.directionHistory > 10 then
+            table.remove(data.directionHistory)
+        end
     end
     
     data.lastPosition = currentPos
     data.lastVelocity = currentVel
     data.lastTime = currentTime
     
-    local finalTargetPart = "UpperTorso"
+    -- Determine target part based on jumping state
+    local isJumping = isPlayerJumping(character)
+    local finalTargetPart
+    
+    if isJumping then
+        finalTargetPart = "HumanoidRootPart"
+    else
+        finalTargetPart = "UpperTorso"
+    end
+    
     local chosenPart = character:FindFirstChild(finalTargetPart) or character:FindFirstChild("Torso") or targetPart or hrp
     
     local targetPos = chosenPart.Position
     local velocity = chosenPart.AssemblyLinearVelocity or Vector3.new()
     
-    local predictionTime = math.clamp(NetworkMetrics.RTTBuffer + 0.03, 0.04, 0.15)
+    -- Base prediction time
+    local basePrediction = NetworkMetrics.RTTBuffer + 0.03
+    local speedBonus = math.min(velocity.Magnitude / 2000, 0.08)
+    local predictionTime = math.clamp(basePrediction + speedBonus, 0.04, 0.2)
     
+    -- STRAFE/ZIGZAG DETECTION AND COMPENSATION
+    local strafeDirection = detectStrafeDirection(player, velocity)
+    local isStrafing = math.abs(strafeDirection) > 0
+    local isZigzagging = false
+    
+    -- Detect zigzag (frequent direction changes)
+    if #data.directionHistory >= 5 then
+        local directionChanges = 0
+        for i = 2, #data.directionHistory do
+            local dot = data.directionHistory[i-1]:Dot(data.directionHistory[i])
+            if dot < 0.7 then -- Significant direction change
+                directionChanges = directionChanges + 1
+            end
+        end
+        isZigzagging = directionChanges >= 3
+    end
+    
+    -- Start with linear prediction
     local predictedPos = targetPos + (velocity * predictionTime)
     
+    -- Apply gravity for vertical movement
     if velocity.Y ~= 0 then
-        local verticalPos = targetPos.Y + (velocity.Y * predictionTime) - (0.5 * PredictionSystem.gravity * predictionTime * predictionTime)
+        local gravity = PredictionSystem.gravity
+        local verticalPos = targetPos.Y + (velocity.Y * predictionTime) - (0.5 * gravity * predictionTime * predictionTime)
         predictedPos = Vector3.new(predictedPos.X, verticalPos, predictedPos.Z)
+    end
+    
+    -- STRAFE COMPENSATION
+    if isStrafing and velocity.Magnitude > 8 then
+        -- Predict strafe offset based on direction
+        local strafeOffset = 0
+        local strafeStrength = math.min(velocity.Magnitude / 50, 2.5)
+        
+        if strafeDirection > 0 then
+            -- Strafing right - aim slightly ahead in that direction
+            local rightVector = chosenPart.CFrame.RightVector
+            strafeOffset = strafeStrength * predictionTime * 15
+            predictedPos = predictedPos + (rightVector * strafeOffset)
+        elseif strafeDirection < 0 then
+            -- Strafing left - aim slightly ahead in that direction
+            local leftVector = -chosenPart.CFrame.RightVector
+            strafeOffset = strafeStrength * predictionTime * 15
+            predictedPos = predictedPos + (leftVector * strafeOffset)
+        end
+    end
+    
+    -- ZIGZAG COMPENSATION (harder to predict, aim more central)
+    if isZigzagging then
+        -- When zigzagging, aim more towards center mass and reduce horizontal offset
+        predictedPos = Vector3.new(
+            predictedPos.X,
+            predictedPos.Y + 0.5, -- Slightly higher for zigzag
+            predictedPos.Z
+        )
+        -- Add small random offset to compensate for erratic movement
+        local zigzagFactor = math.sin(tick() * 15) * 0.8
+        predictedPos = predictedPos + (chosenPart.CFrame.RightVector * zigzagFactor * 0.5)
+    end
+    
+    -- Jumping adjustment (aim lower)
+    if isJumping then
+        predictedPos = Vector3.new(predictedPos.X, predictedPos.Y - 1.8, predictedPos.Z)
+    end
+    
+    -- Use velocity history for smoothing (reduces jitter)
+    if #data.velocityHistory >= 3 then
+        local avgVelX = 0
+        local avgVelZ = 0
+        for i = 1, math.min(3, #data.velocityHistory) do
+            avgVelX = avgVelX + data.velocityHistory[i].vel.X
+            avgVelZ = avgVelZ + data.velocityHistory[i].vel.Z
+        end
+        avgVelX = avgVelX / 3
+        avgVelZ = avgVelZ / 3
+        local smoothedVel = Vector3.new(avgVelX, velocity.Y, avgVelZ)
+        local smoothedPos = targetPos + (smoothedVel * predictionTime)
+        -- Blend between linear and smoothed (70/30)
+        predictedPos = predictedPos * 0.7 + smoothedPos * 0.3
     end
     
     return predictedPos
 end
 
+-- Simplified version for functions that don't need advanced prediction
+local function predictPlayerPosition(player, targetPart)
+    return predictPlayerPositionAdvanced(player, targetPart)
+end
+
+-- ===== STATE =====
 local State = {
     SpeedBoost = { Enabled = false, Speed = 19 },
     ESP = { Enabled = false, NameTags = true, FillTransparency = 0.84 },
@@ -635,7 +796,6 @@ local State = {
     GodMode = { Enabled = false, Keybind = "G" },
     AntiFling = { Enabled = false },
     Noclip = { Enabled = false },
-    FPSBoost = { Enabled = false },
     Gun = { ESP = true, DropHighlight = true, Tracer = true, AutoTP = false },
     Teleport = { LastGunPos = nil },
     Desync = { featureEnabled = false, active = false, Keybind = "Z" },
@@ -650,6 +810,12 @@ local State = {
         currentDesyncCoroutine = nil,
         currentTarget = nil,
         startTime = 0,
+    },
+    AutoFarm = {
+        Enabled = false,
+        Mode = "DESYNC",
+        ESPEnabled = false,
+        TweenSpeed = 0.8,
     }
 }
 
@@ -718,132 +884,6 @@ local function disableNoclip()
         end
     end
 end
-
--- ===== FPS BOOST (Anti-Lag) Feature =====
-local fpsBoostAssets = {}
-local originalLightingSettings = {}
-
-local function enableFPSBoost()
-    if not State.FPSBoost.Enabled then return end
-    
-    local ToDisable = {
-        Textures = true,
-        VisualEffects = true,
-        Parts = true,
-        Particles = true,
-        Sky = true
-    }
-    
-    local ToEnable = {
-        FullBright = false
-    }
-    
-    -- Save original lighting settings
-    local lighting = game:GetService("Lighting")
-    originalLightingSettings = {
-        FogColor = lighting.FogColor,
-        FogEnd = lighting.FogEnd,
-        FogStart = lighting.FogStart,
-        Ambient = lighting.Ambient,
-        Brightness = lighting.Brightness,
-        ColorShift_Bottom = lighting.ColorShift_Bottom,
-        ColorShift_Top = lighting.ColorShift_Top,
-        OutdoorAmbient = lighting.OutdoorAmbient,
-        Outlines = lighting.Outlines,
-        GlobalShadows = lighting.GlobalShadows
-    }
-    
-    for _, v in next, game:GetDescendants() do
-        if ToDisable.Parts then
-            if v:IsA("Part") or v:IsA("Union") or v:IsA("BasePart") then
-                v.Material = Enum.Material.SmoothPlastic
-                table.insert(fpsBoostAssets, v)
-            end
-        end
-        
-        if ToDisable.Particles then
-            if v:IsA("ParticleEmitter") or v:IsA("Smoke") or v:IsA("Explosion") or v:IsA("Sparkles") or v:IsA("Fire") then
-                v.Enabled = false
-                table.insert(fpsBoostAssets, v)
-            end
-        end
-        
-        if ToDisable.VisualEffects then
-            if v:IsA("BloomEffect") or v:IsA("BlurEffect") or v:IsA("DepthOfFieldEffect") or v:IsA("SunRaysEffect") then
-                v.Enabled = false
-                table.insert(fpsBoostAssets, v)
-            end
-        end
-        
-        if ToDisable.Textures then
-            if v:IsA("Decal") or v:IsA("Texture") then
-                v.Texture = ""
-                table.insert(fpsBoostAssets, v)
-            end
-        end
-        
-        if ToDisable.Sky then
-            if v:IsA("Sky") then
-                v.Parent = nil
-                table.insert(fpsBoostAssets, v)
-            end
-        end
-    end
-    
-    if ToEnable.FullBright then
-        lighting.FogColor = Color3.fromRGB(255, 255, 255)
-        lighting.FogEnd = math.huge
-        lighting.FogStart = math.huge
-        lighting.Ambient = Color3.fromRGB(255, 255, 255)
-        lighting.Brightness = 5
-        lighting.ColorShift_Bottom = Color3.fromRGB(255, 255, 255)
-        lighting.ColorShift_Top = Color3.fromRGB(255, 255, 255)
-        lighting.OutdoorAmbient = Color3.fromRGB(255, 255, 255)
-        lighting.Outlines = true
-        lighting.GlobalShadows = false
-    end
-    
-    Notifier.new({Title="FPS Boost", Content="Enabled - "..#fpsBoostAssets.." assets optimized", Duration=3})
-end
-
-local function disableFPSBoost()
-    -- Restore lighting settings
-    local lighting = game:GetService("Lighting")
-    for setting, value in pairs(originalLightingSettings) do
-        pcall(function() lighting[setting] = value end)
-    end
-    
-    -- Clear stored assets (they'll be recreated by the game)
-    fpsBoostAssets = {}
-    
-    Notifier.new({Title="FPS Boost", Content="Disabled", Duration=2})
-end
-
-local function toggleFPSBoost()
-    State.FPSBoost.Enabled = not State.FPSBoost.Enabled
-    if State.FPSBoost.Enabled then
-        enableFPSBoost()
-    else
-        disableFPSBoost()
-    end
-end
-
--- Monitor for new objects when FPS Boost is on
-workspace.DescendantAdded:Connect(function(desc)
-    if not State.FPSBoost.Enabled then return end
-    
-    if desc:IsA("Part") or desc:IsA("Union") or desc:IsA("BasePart") then
-        desc.Material = Enum.Material.SmoothPlastic
-    elseif desc:IsA("ParticleEmitter") or desc:IsA("Smoke") or desc:IsA("Explosion") or desc:IsA("Sparkles") or desc:IsA("Fire") then
-        desc.Enabled = false
-    elseif desc:IsA("BloomEffect") or desc:IsA("BlurEffect") or desc:IsA("DepthOfFieldEffect") or desc:IsA("SunRaysEffect") then
-        desc.Enabled = false
-    elseif desc:IsA("Decal") or desc:IsA("Texture") then
-        desc.Texture = ""
-    elseif desc:IsA("Sky") then
-        desc.Parent = nil
-    end
-end)
 
 LocalPlayer.CharacterAdded:Connect(function()
     task.wait(0.5)
@@ -1675,10 +1715,18 @@ local function getMurdererTargetPosition()
     end
     
     local character = targetMurderer.Character
-    local torso = character:FindFirstChild("UpperTorso") or character:FindFirstChild("Torso")
-    if not torso then return nil end
+    local isJumping = isPlayerJumping(character)
+    local targetPart
     
-    return predictPlayerPosition(targetMurderer, torso)
+    if isJumping then
+        targetPart = character:FindFirstChild("HumanoidRootPart")
+    else
+        targetPart = character:FindFirstChild("UpperTorso") or character:FindFirstChild("Torso")
+    end
+    
+    if not targetPart then return nil end
+    
+    return predictPlayerPosition(targetMurderer, targetPart)
 end
 
 local function setupSilentAim()
@@ -1737,7 +1785,15 @@ local function getBestTarget()
         if plr ~= LocalPlayer and isAlive(plr) and plr.Character then
             if State.Aimbot.OnlyMurderer and not isMurderer(plr) then continue end
             
-            local targetPart = plr.Character:FindFirstChild("UpperTorso") or plr.Character:FindFirstChild("Torso")
+            local isJumping = isPlayerJumping(plr.Character)
+            local targetPart
+            
+            if isJumping then
+                targetPart = plr.Character:FindFirstChild("HumanoidRootPart")
+            else
+                targetPart = plr.Character:FindFirstChild("UpperTorso") or plr.Character:FindFirstChild("Torso")
+            end
+            
             if not targetPart then targetPart = plr.Character:FindFirstChild("Head") end
             
             if targetPart then
@@ -1768,12 +1824,21 @@ local function updateAimbot()
     local targetPlr = getBestTarget()
     if not targetPlr or not targetPlr.Character then return end
     
-    local targetPart = targetPlr.Character:FindFirstChild("UpperTorso") or targetPlr.Character:FindFirstChild("Torso")
+    local isJumping = isPlayerJumping(targetPlr.Character)
+    local targetPart
+    
+    if isJumping then
+        targetPart = targetPlr.Character:FindFirstChild("HumanoidRootPart")
+    else
+        targetPart = targetPlr.Character:FindFirstChild("UpperTorso") or targetPlr.Character:FindFirstChild("Torso")
+    end
+    
     if not targetPart then targetPart = targetPlr.Character:FindFirstChild("HumanoidRootPart") end
     
     if not targetPart then return end
     
-    local predictedPos = predictPlayerPosition(targetPlr, targetPart)
+    -- Use advanced prediction for strafing/zigzagging
+    local predictedPos = predictPlayerPositionAdvanced(targetPlr, targetPart)
     
     local camera = Workspace.CurrentCamera
     local currentCFrame = camera.CFrame
@@ -1784,7 +1849,11 @@ local function updateAimbot()
     
     if targetPlr ~= LastLockedTarget then
         LastLockedTarget = targetPlr
-        Notifier.new({Title="Aimbot Locked", Content="Target: "..targetPlr.Name..(isMurderer(targetPlr) and " (Murderer)" or ""), Duration=1.8})
+        local strafeInfo = ""
+        if math.abs(detectStrafeDirection(targetPlr, targetPlr.Character.HumanoidRootPart.Velocity)) > 0 then
+            strafeInfo = " (Strafing)"
+        end
+        Notifier.new({Title="Aimbot Locked", Content="Target: "..targetPlr.Name..(isMurderer(targetPlr) and " (Murderer)" or "")..(isJumping and " (Jumping)" or "")..strafeInfo, Duration=1.5})
     end
 end
 
@@ -1820,12 +1889,20 @@ local function performFlickShoot()
         return
     end
     
-    local targetPart = targetPlr.Character:FindFirstChild("UpperTorso") or targetPlr.Character:FindFirstChild("Torso")
+    local isJumping = isPlayerJumping(targetPlr.Character)
+    local targetPart
+    
+    if isJumping then
+        targetPart = targetPlr.Character:FindFirstChild("HumanoidRootPart")
+    else
+        targetPart = targetPlr.Character:FindFirstChild("UpperTorso") or targetPlr.Character:FindFirstChild("Torso")
+    end
+    
     if not targetPart then targetPart = targetPlr.Character:FindFirstChild("HumanoidRootPart") end
     
     if not targetPart then return end
     
-    local targetPos = predictPlayerPosition(targetPlr, targetPart)
+    local targetPos = predictPlayerPositionAdvanced(targetPlr, targetPart)
     
     local camera = Workspace.CurrentCamera
     local startCFrame = camera.CFrame
@@ -1887,12 +1964,17 @@ local function predictMurdererPosSH(murderer)
     return predictedPos
 end
 
+-- FIXED stopSilentHacker function (no "cannot cancel thread" error)
 local function stopSilentHacker()
     State.SilentHacker.isDesyncing = false
     State.SilentHacker.currentTarget = nil
     
     if State.SilentHacker.currentDesyncCoroutine then
-        task.cancel(State.SilentHacker.currentDesyncCoroutine)
+        pcall(function()
+            if coroutine.status(State.SilentHacker.currentDesyncCoroutine) ~= "dead" then
+                task.cancel(State.SilentHacker.currentDesyncCoroutine)
+            end
+        end)
         State.SilentHacker.currentDesyncCoroutine = nil
     end
     
@@ -1934,7 +2016,11 @@ local function performSilentHacker()
     Notifier.new({Title="Silent Hacker ACTIVE", Content="Behind "..murderer.Name.." - AUTO SHOOTING!", Duration=3})
     
     if State.SilentHacker.currentDesyncCoroutine then
-        task.cancel(State.SilentHacker.currentDesyncCoroutine)
+        pcall(function()
+            if coroutine.status(State.SilentHacker.currentDesyncCoroutine) ~= "dead" then
+                task.cancel(State.SilentHacker.currentDesyncCoroutine)
+            end
+        end)
     end
     
     State.SilentHacker.currentDesyncCoroutine = task.spawn(function()
@@ -2498,9 +2584,208 @@ OriginalCFrameHook = hookmetamethod(game, "__index", newcclosure(function(Self, 
     return OriginalCFrameHook(Self, Key)
 end))
 
+-- ===== AUTO FARM (COIN COLLECTOR) FEATURE =====
+local AutoFarm = {
+    isCollecting = false,
+    coinsList = {},
+    coinHighlights = {},
+    isWaitingForNewCoins = false,
+    tweenSpeed = 0.8,
+}
+
+local function isCoin(part)
+    if not part or not part:IsA("BasePart") then return false end
+    if not part.Name then return false end
+    local nameLower = part.Name:lower()
+    return nameLower:find("coin") or nameLower:find("pickup") or nameLower:find("cash") or nameLower:find("money")
+end
+
+local function getDistanceToCoin(pos)
+    local character = LocalPlayer.Character
+    local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then return math.huge end
+    return (rootPart.Position - pos).Magnitude
+end
+
+local function sortCoinsByDistance(coins, currentPos)
+    for _, coin in ipairs(coins) do
+        coin.distance = (currentPos - coin.position).Magnitude
+    end
+    table.sort(coins, function(a, b) return a.distance < b.distance end)
+    return coins
+end
+
+local function scanForCoins()
+    local coins = {}
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if isCoin(obj) then
+            table.insert(coins, {
+                part = obj,
+                position = obj.Position,
+                name = obj.Name,
+                distance = 0
+            })
+        end
+    end
+    return coins
+end
+
+local function highlightCoin(coin)
+    if not coin or not coin:IsA("BasePart") then return end
+    if AutoFarm.coinHighlights[coin] then return end
+    
+    local hl = Instance.new("Highlight")
+    hl.Name = "AutoFarmCoinHighlight"
+    hl.Adornee = coin
+    hl.FillColor = Color3.fromRGB(255, 215, 0)
+    hl.OutlineColor = Color3.fromRGB(255, 255, 255)
+    hl.FillTransparency = 0.3
+    hl.Parent = coin
+    AutoFarm.coinHighlights[coin] = hl
+end
+
+local function clearCoinHighlights()
+    for coin, hl in pairs(AutoFarm.coinHighlights) do
+        pcall(function() hl:Destroy() end)
+    end
+    AutoFarm.coinHighlights = {}
+end
+
+local function refreshCoinESP()
+    if not State.AutoFarm.ESPEnabled then
+        clearCoinHighlights()
+        return
+    end
+    
+    for _, obj in ipairs(workspace:GetDescendants()) do
+        if isCoin(obj) then
+            highlightCoin(obj)
+        end
+    end
+end
+
+local function desyncCollect(targetPos)
+    local character = LocalPlayer.Character
+    local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then return false end
+    
+    local originalPos = rootPart.CFrame
+    rootPart.CFrame = CFrame.new(targetPos.X, targetPos.Y + 2, targetPos.Z)
+    task.wait(0.15)
+    rootPart.CFrame = originalPos
+    return true
+end
+
+local function tweenCollect(targetPos)
+    local character = LocalPlayer.Character
+    local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+    if not rootPart then return false end
+    
+    local targetCFrame = CFrame.new(targetPos.X, targetPos.Y + 2, targetPos.Z)
+    local tweenInfo = TweenInfo.new(State.AutoFarm.TweenSpeed, Enum.EasingStyle.Quad, Enum.EasingDirection.InOut)
+    local tween = TweenService:Create(rootPart, tweenInfo, {CFrame = targetCFrame})
+    tween:Play()
+    tween.Completed:Wait()
+    task.wait(0.1)
+    return true
+end
+
+local function startAutoFarm()
+    if AutoFarm.isCollecting then return end
+    AutoFarm.isCollecting = true
+    AutoFarm.isWaitingForNewCoins = false
+    
+    while State.AutoFarm.Enabled do
+        local allCoins = scanForCoins()
+        
+        if #allCoins == 0 then
+            if not AutoFarm.isWaitingForNewCoins then
+                AutoFarm.isWaitingForNewCoins = true
+            end
+            task.wait(1)
+        else
+            AutoFarm.isWaitingForNewCoins = false
+            
+            local character = LocalPlayer.Character
+            local rootPart = character and character:FindFirstChild("HumanoidRootPart")
+            
+            if not rootPart then
+                task.wait(0.5)
+            else
+                local sortedCoins = sortCoinsByDistance(allCoins, rootPart.Position)
+                
+                for i, coin in ipairs(sortedCoins) do
+                    if not State.AutoFarm.Enabled then break end
+                    
+                    if not coin.part or not coin.part.Parent then
+                        break
+                    end
+                    
+                    if coin.part then
+                        local tempHighlight = Instance.new("Highlight")
+                        tempHighlight.Adornee = coin.part
+                        tempHighlight.FillColor = Color3.fromRGB(255, 50, 50)
+                        tempHighlight.FillTransparency = 0.2
+                        tempHighlight.Parent = coin.part
+                        task.delay(0.3, function() pcall(function() tempHighlight:Destroy() end) end)
+                    end
+                    
+                    if State.AutoFarm.Mode == "DESYNC" then
+                        desyncCollect(coin.position)
+                        task.wait(1.5)
+                    else
+                        tweenCollect(coin.position)
+                    end
+                    
+                    refreshCoinESP()
+                end
+                
+                task.wait(0.3)
+            end
+        end
+    end
+    
+    AutoFarm.isCollecting = false
+end
+
+local function toggleAutoFarm()
+    State.AutoFarm.Enabled = not State.AutoFarm.Enabled
+    
+    if State.AutoFarm.Enabled then
+        refreshCoinESP()
+        task.spawn(startAutoFarm)
+    else
+        AutoFarm.isCollecting = false
+        clearCoinHighlights()
+    end
+end
+
+local function toggleAutoFarmESP()
+    State.AutoFarm.ESPEnabled = not State.AutoFarm.ESPEnabled
+    if State.AutoFarm.ESPEnabled then
+        refreshCoinESP()
+    else
+        clearCoinHighlights()
+    end
+end
+
+local function setAutoFarmMode(mode)
+    State.AutoFarm.Mode = mode
+end
+
+local function setTweenSpeed(speed)
+    State.AutoFarm.TweenSpeed = 0.3 + (speed / 100) * 2.7
+end
+
+workspace.DescendantAdded:Connect(function(desc)
+    if State.AutoFarm.ESPEnabled and isCoin(desc) then
+        highlightCoin(desc)
+    end
+end)
+
 -- ===== UI SETUP =====
 local Window = Compkiller.new({
-    Name = "I Love Annie - MM2 ENHANCED + TRADE + NOCLIP + FPS BOOST",
+    Name = "I Love Annie - MM2 ENHANCED + TRADE + NOCLIP + AUTO FARM",
     Keybind = "P",
     Logo = "rbxassetid://120245531583106",
     Scale = Compkiller.Scale.Window,
@@ -2523,8 +2808,8 @@ task.spawn(function()
 end)
 
 Notifier.new({
-    Title = "I Love Annie - MM2 + TRADE + NOCLIP + FPS BOOST",
-    Content = "Trade system + Noclip + FPS Boost running in background | Silent Hacker + Silent Aim Connected!",
+    Title = "I Love Annie - MM2 + TRADE + NOCLIP + AUTO FARM",
+    Content = "Trade system + Noclip + Auto Farm running in background | Silent Hacker + Silent Aim Connected! | Advanced Prediction for Strafing/Zigzag!",
     Duration = 8,
     Icon = "rbxassetid://120245531583106"
 });
@@ -2841,7 +3126,6 @@ ExploitSurvivalSection:AddToggle({
     end,
 })
 
--- NOCLIP TOGGLE
 ExploitSurvivalSection:AddToggle({
     Name = "Enable Noclip",
     Flag = "Noclip_Enabled",
@@ -2856,23 +3140,6 @@ ExploitSurvivalSection:AddToggle({
             disableNoclip()
             Notifier.new({Title="Noclip", Content="Disabled", Duration=2})
         end
-    end,
-})
-
--- FPS BOOST TOGGLE (Anti-Lag)
-ExploitSurvivalSection:AddToggle({
-    Name = "FPS Boost",
-    Flag = "FPSBoost_Enabled",
-    Default = false,
-    Risky = false,
-    Callback = function(v)
-        State.FPSBoost.Enabled = v
-        if v then
-            enableFPSBoost()
-        else
-            disableFPSBoost()
-        end
-        Notifier.new({Title="FPS Boost", Content=v and "Enabled - Textures/Particles removed" or "Disabled", Duration=2})
     end,
 })
 
@@ -3123,6 +3390,56 @@ PlayersActionsSection:AddToggle({
     end,
 })
 
+-- ===== AUTO FARM TAB =====
+local AutoFarmTab = Window:DrawTab({ Name = "Auto Farm", Icon = "dollar-sign", EnableScrolling = true })
+local AutoFarmSection = AutoFarmTab:DrawSection({ Name = "Coin Collector", Position = 'left' })
+
+AutoFarmSection:AddToggle({
+    Name = "Enable Auto Farm",
+    Flag = "AutoFarm_Enabled",
+    Default = false,
+    Callback = function(v)
+        toggleAutoFarm()
+    end,
+})
+
+AutoFarmSection:AddToggle({
+    Name = "Show Coin ESP",
+    Flag = "AutoFarm_ESP",
+    Default = false,
+    Callback = function(v)
+        toggleAutoFarmESP()
+    end,
+})
+
+AutoFarmSection:AddDropdown({
+    Name = "Collection Mode",
+    Flag = "AutoFarm_Mode",
+    Default = "DESYNC",
+    Values = {"DESYNC", "TWEEN"},
+    Callback = function(v)
+        setAutoFarmMode(v)
+    end,
+})
+
+AutoFarmSection:AddSlider({
+    Name = "Tween Speed (1 = Fast, 100 = Slow)",
+    Min = 1,
+    Max = 100,
+    Default = 50,
+    Flag = "Tween_Speed",
+    Callback = function(v)
+        setTweenSpeed(v)
+        local speedSeconds = 0.3 + (v / 100) * 2.7
+        Notifier.new({Title="Tween Speed", Content=string.format("%.1f seconds per coin", speedSeconds), Duration=2})
+    end,
+})
+
+AutoFarmSection:AddParagraph({
+    title = "Auto Farm Info",
+    text = "Automatically collects all coins in the map\n- DESYNC: Teleports to coins and snaps back\n- TWEEN: Smoothly moves to each coin\n- TWEEN SPEED: Adjust how fast/slow you move\n- ESP highlights coins in GOLD\n- Continues until no coins remain\n- Resumes when new coins appear",
+})
+
 Window:DrawCategory({ Name = "Settings" })
 local SettingsTab = Window:DrawTab({ Name = "Settings", Icon = "settings", EnableScrolling = true })
 local UISettingsSection = SettingsTab:DrawSection({ Name = "UI Settings", Position = 'left' })
@@ -3172,7 +3489,7 @@ task.spawn(function()
     Compkiller:SetTheme("Dark Blue")
     Notifier.new({
         Title = "Theme Applied",
-        Content = "Dark Blue theme loaded! Trade system + Noclip + FPS Boost active in background.",
+        Content = "Dark Blue theme loaded! Trade system + Noclip + Auto Farm active in background.",
         Duration = 4,
         Icon = "paint-brush"
     })
@@ -3180,6 +3497,6 @@ end)
 
 Notifier.new({
     Title = "MM2",
-    Content = "loaded - FPS Boost added!",
+    Content = "loaded - Auto Farm added! Advanced strafe/zigzag prediction!",
     Duration = 6
 })
