@@ -2523,7 +2523,7 @@ VisualsPlayerSection:AddSlider({
     Callback = function(v) State.esp_transparency = v; UpdateAllESPColors() end
 })
 
-local VisualsGunSection = VisualsTab:DrawSection({ Name = "Gun ESP", Position = 'left' })
+local VisualsGunSection = VisualsTab:DrawSection({ Name = "Gun ESP", Position = 'right' })
 VisualsGunSection:AddToggle({
     Name = "Enable Tool Gun ESP",
     Flag = "GunESP_Enabled",
@@ -2607,7 +2607,7 @@ SheriffCameraSection:AddKeybind({
     Callback = function(v) State.aimbot_keybind = v end,
 })
 
-local SheriffFlickSection = SheriffTab:DrawSection({ Name = "Flick Shoot (TORSO)", Position = 'left' })
+local SheriffFlickSection = SheriffTab:DrawSection({ Name = "Flick Shoot (TORSO)", Position = 'right' })
 SheriffFlickSection:AddToggle({
     Name = "Enable Flick Shoot",
     Flag = "FlickShoot_Enabled",
@@ -2641,7 +2641,7 @@ SheriffSilentSection:AddToggle({
     Callback = function(v) aimOnlyWhenHolding = v end,
 })
 
-local SheriffSilentHackerSection = SheriffTab:DrawSection({ Name = "Silent Hacker", Position = 'left' })
+local SheriffSilentHackerSection = SheriffTab:DrawSection({ Name = "Silent Hacker", Position = 'right' })
 SheriffSilentHackerSection:AddToggle({
     Name = "Enable Silent Hacker",
     Flag = "SilentHacker_Enabled",
@@ -2674,8 +2674,7 @@ SheriffTriggerSection:AddToggle({
     end,
 })
 
--- ===== GUN TELEPORTER SECTION (MOVED TO SHERIFF TAB) =====
-local SheriffGunTPSection = SheriffTab:DrawSection({ Name = "Gun Teleporter", Position = 'left' })
+local SheriffGunTPSection = SheriffTab:DrawSection({ Name = "Gun Teleporter", Position = 'right' })
 SheriffGunTPSection:AddButton({ Name = "Teleport to Gun (Snap Back)", Callback = TeleportToGunSnapBack })
 SheriffGunTPSection:AddToggle({ Name = "Enable Auto Teleport to Gun", Flag = "AutoGunTP_Enabled", Default = false, Callback = function(v) State.gun_autotp = v end })
 SheriffGunTPSection:AddParagraph({ title = "Info", text = "Teleports you to dropped gun and snaps back. Auto TP works when gun drops." })
@@ -2702,7 +2701,7 @@ MurdererRageSection:AddKeybind({
     Callback = function(v) State.killaura_keybind = v end,
 })
 
-local MurdererHitboxSection = MurdererTab:DrawSection({ Name = "Hitbox Expander", Position = 'left' })
+local MurdererHitboxSection = MurdererTab:DrawSection({ Name = "Hitbox Expander", Position = 'right' })
 MurdererHitboxSection:AddToggle({
     Name = "Enable Hitbox Expander",
     Flag = "Hitbox_Enabled",
@@ -2752,7 +2751,7 @@ MovementWalkSpeedSection:AddSlider({
     Callback = function(v) State.walkspeed_amount = v; if State.walkspeed_enabled then applyWalkSpeed() end; Notifier.new({Title="WalkSpeed", Content="Set to "..v, Duration=1.5}) end
 })
 
-local MovementInfiniteJumpSection = MovementTab:DrawSection({ Name = "Infinite Jump", Position = 'left' })
+local MovementInfiniteJumpSection = MovementTab:DrawSection({ Name = "Infinite Jump", Position = 'right' })
 MovementInfiniteJumpSection:AddToggle({
     Name = "Enable Infinite Jump",
     Flag = "InfiniteJump_Enabled",
@@ -2778,7 +2777,7 @@ MovementSpeedSection:AddSlider({
     Callback = function(v) State.speedboost_amount = v end
 })
 
-local MovementAntiFlingSection = MovementTab:DrawSection({ Name = "Anti-Fling", Position = 'left' })
+local MovementAntiFlingSection = MovementTab:DrawSection({ Name = "Anti-Fling", Position = 'right' })
 MovementAntiFlingSection:AddToggle({
     Name = "Enable Anti-Fling",
     Flag = "AntiFling_Enabled",
@@ -2828,7 +2827,7 @@ ExploitSurvivalSection:AddToggle({
 })
 ExploitSurvivalSection:AddKeybind({ Name = "God Mode Keybind", Default = "G", Flag = "GodMode_Keybind", Callback = function(v) State.godmode_keybind = v end })
 
-local ExploitDesyncSection = ExploitTab:DrawSection({ Name = "Desync", Position = 'left' })
+local ExploitDesyncSection = ExploitTab:DrawSection({ Name = "Desync", Position = 'right' })
 DesyncToggle = ExploitDesyncSection:AddToggle({
     Name = "Enable Desync Feature",
     Flag = "Desync_Enabled",
@@ -2848,7 +2847,7 @@ ExploitMethodSettingsSection:AddSlider({ Name = "Oscillate Distance", Min = 10, 
 ExploitMethodSettingsSection:AddSlider({ Name = "Oscillate Speed", Min = 1, Max = 20, Default = 5, Round = 1, Flag = "Oscillate_Speed", Callback = function(v) getgenv().Desync.OscillateSpeed = v end })
 ExploitMethodSettingsSection:AddSlider({ Name = "Spin Speed", Min = 5, Max = 100, Default = 20, Round = 0, Flag = "Spin_Speed", Callback = function(v) getgenv().Desync.SpinSpeed = v end })
 
-local ExploitAutoAvoidSection = ExploitTab:DrawSection({ Name = "Auto Avoid Murderer", Position = 'left' })
+local ExploitAutoAvoidSection = ExploitTab:DrawSection({ Name = "Auto Avoid Murderer", Position = 'right' })
 ExploitAutoAvoidSection:AddToggle({ Name = "Enable Auto Avoid Murderer", Flag = "AutoAvoid_Murderer", Default = false, Callback = function(v) getgenv().Desync.AutoAvoidMurderer = v; Notifier.new({Title="Auto Avoid", Content=v and "Enabled" or "Disabled", Duration=2}) end })
 ExploitAutoAvoidSection:AddSlider({ Name = "Avoid Distance (studs)", Min = 5, Max = 50, Default = 20, Round = 0, Flag = "Avoid_Distance", Callback = function(v) getgenv().Desync.AvoidDistance = v end })
 
@@ -2861,7 +2860,7 @@ PlayersTeleportsSection:AddButton({ Name = "Emergency Teleport", Callback = tpEm
 PlayersTeleportsSection:AddButton({ Name = "Respawn", Callback = respawn })
 
 local SelectedPlayerName = nil
-local PlayersSelectorSection = PlayersTab:DrawSection({ Name = "Player Selector", Position = 'left' })
+local PlayersSelectorSection = PlayersTab:DrawSection({ Name = "Player Selector", Position = 'right' })
 local PlayerDropdown = PlayersSelectorSection:AddDropdown({
     Name = "Select Player",
     Default = "",
@@ -2984,7 +2983,7 @@ UISettingsSection:AddColorPicker({ Name = "Toggle Color", Default = Compkiller.C
 UISettingsSection:AddColorPicker({ Name = "Background Color", Default = Compkiller.Colors.BGDBColor, Callback = function(v) Compkiller.Colors.BGDBColor = v; Compkiller:RefreshCurrentColor() end })
 UISettingsSection:AddButton({ Name = "Get Theme", Callback = function() Notifier.new({Title="Theme", Content="Copied to clipboard", Duration=3}) end })
 
-local ThemeSection = SettingsTab:DrawSection({ Name = "UI Themes", Position = 'left' })
+local ThemeSection = SettingsTab:DrawSection({ Name = "UI Themes", Position = 'right' })
 ThemeSection:AddDropdown({ Name = "Select Theme", Default = "Dark Blue", Values = {"Default", "Dark Green", "Dark Blue", "Purple Rose", "Skeet"}, Callback = function(v) Compkiller:SetTheme(v) end })
 
 local ConfigUI = Window:DrawConfig({ Name = "Config", Icon = "folder", Config = ConfigManager })
