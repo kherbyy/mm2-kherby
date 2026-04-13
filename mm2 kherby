@@ -1,6 +1,6 @@
 -- ============================================
---   FIXED: No "out of local registers" error
---   All features preserved
+--   FULL MM2 SCRIPT with HERO DETECTION
+--   Heroes appear YELLOW in ESP
 -- ============================================
 
 Compkiller = loadstring(game:HttpGet("https://raw.githubusercontent.com/4lpaca-pin/CompKiller/refs/heads/main/src/source.luau"))();
@@ -117,9 +117,20 @@ end
 isSheriffFast = function(plr)
     if not plr then return false end
     local data = RoleCache[plr.Name]
-    if data then return data.Role == "Sheriff" or data.Role == "Hero" end
+    if data then 
+        return data.Role == "Sheriff"
+    end
     return (plr.Backpack and (plr.Backpack:FindFirstChild("Gun") or plr.Backpack:FindFirstChild("Revolver"))) or
            (plr.Character and (plr.Character:FindFirstChild("Gun") or plr.Character:FindFirstChild("Revolver")))
+end
+
+isHeroFast = function(plr)
+    if not plr then return false end
+    local data = RoleCache[plr.Name]
+    if data then
+        return data.Role == "Hero"
+    end
+    return false
 end
 
 isAliveFast = function(plr)
@@ -129,11 +140,12 @@ isAliveFast = function(plr)
 end
 
 isInnocentFast = function(plr)
-    return plr ~= LocalPlayer and isAliveFast(plr) and not isMurdererFast(plr) and not isSheriffFast(plr)
+    return plr ~= LocalPlayer and isAliveFast(plr) and not isMurdererFast(plr) and not isSheriffFast(plr) and not isHeroFast(plr)
 end
 
 getgenv().isMurderer = isMurdererFast
 getgenv().isSheriff = isSheriffFast
+getgenv().isHero = isHeroFast
 getgenv().isAlive = isAliveFast
 getgenv().isInnocent = isInnocentFast
 
@@ -165,7 +177,7 @@ getgenv().MM2State = {
 }
 State = getgenv().MM2State
 
--- ===== TRADE SYSTEM (all variables global) =====
+-- ===== TRADE SYSTEM =====
 Sync = nil
 pcall(function() Sync = require(ReplicatedStorage:WaitForChild("Database"):WaitForChild("Sync")) end)
 
@@ -774,6 +786,7 @@ end
 
 isMurderer = function(plr) return getgenv().isMurderer(plr) end
 isSheriff = function(plr) return getgenv().isSheriff(plr) end
+isHero = function(plr) return getgenv().isHero(plr) end
 isAlive = function(plr) return getgenv().isAlive(plr) end
 isInnocent = function(plr) return getgenv().isInnocent(plr) end
 hasGun = function() return hasItem(LocalPlayer, "Gun") or hasItem(LocalPlayer, "Revolver") end
@@ -790,11 +803,13 @@ getCurrentMap = function()
     return nil
 end
 
+-- FIXED: Hero appears YELLOW, Sheriff BLUE, Murderer RED, Innocent GREEN
 getRoleColor = function(plr)
     if not plr or not plr.Character then return Color3.fromRGB(0, 255, 0) end
-    if isMurderer(plr) then return Color3.fromRGB(255, 0, 0) end
-    if isSheriff(plr) then return Color3.fromRGB(0, 100, 255) end
-    return Color3.fromRGB(0, 255, 0)
+    if isMurderer(plr) then return Color3.fromRGB(255, 0, 0) end  -- RED
+    if isHero(plr) then return Color3.fromRGB(255, 255, 0) end     -- YELLOW for Hero
+    if isSheriff(plr) then return Color3.fromRGB(0, 100, 255) end  -- BLUE for Sheriff
+    return Color3.fromRGB(0, 255, 0)                               -- GREEN for Innocent
 end
 
 getDisplayName = function(plr) return plr.Name end
@@ -2799,4 +2814,4 @@ task.spawn(function()
 end)
 
 Notifier.new({ Title = "MM2 Script", Content = "Successfully Loaded", Duration = 8 })
-Notifier.new({ Title = "Fast Roles", Content = "Instant role detection active!", Duration = 4 })
+Notifier.new({ Title = "Fast Roles", Content = "Instant role detection active! Heroes = YELLOW", Duration = 4 })
