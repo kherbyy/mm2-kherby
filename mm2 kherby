@@ -1,8 +1,8 @@
 -- ============================================
 --   FULL MM2 SCRIPT with HERO DETECTION
---   Heroes appear YELLOW in ESP
+--   Heroes appear YELLOW instantly when picking up gun!
 --   GUN ESP: PURPLE (Fixed for all maps)
---   BOX ESP ADDED (color changes by role)
+--   2D BOX ESP: Role-based colors!
 -- ============================================
 
 Compkiller = loadstring(game:HttpGet("https://raw.githubusercontent.com/4lpaca-pin/CompKiller/refs/heads/main/src/source.luau"))();
@@ -48,10 +48,10 @@ RunService = game:GetService("RunService")
 Workspace = game:GetService("Workspace")
 Stats = game:GetService("Stats")
 TweenService = game:GetService("TweenService")
+Lighting = game:GetService("Lighting")
 LocalPlayer = Players.LocalPlayer
 mouse = LocalPlayer:GetMouse()
 
--- HELPER
 local function StringToKeyCode(str)
     if not str or str == "" then return nil end
     str = string.upper(str)
@@ -129,8 +129,20 @@ end
 isHeroFast = function(plr)
     if not plr then return false end
     local data = RoleCache[plr.Name]
-    if data then
-        return data.Role == "Hero"
+    if data and data.Role == "Hero" then
+        return true
+    end
+    -- INSTANT CHECK: If they have a gun and are NOT murderer/sheriff, they're hero!
+    if plr ~= LocalPlayer and isAliveFast(plr) then
+        local hasGunTool = (plr.Backpack and plr.Backpack:FindFirstChild("Gun")) or 
+                           (plr.Character and plr.Character:FindFirstChild("Gun")) or
+                           (plr.Backpack and plr.Backpack:FindFirstChild("Revolver")) or
+                           (plr.Character and plr.Character:FindFirstChild("Revolver"))
+        if hasGunTool and not isMurdererFast(plr) and not isSheriffFast(plr) then
+            RoleCache[plr.Name] = RoleCache[plr.Name] or {}
+            RoleCache[plr.Name].Role = "Hero"
+            return true
+        end
     end
     return false
 end
@@ -160,7 +172,8 @@ getgenv().CosmeticBackup = {
 
 -- ===== GLOBAL STATE =====
 getgenv().MM2State = {
-    esp_enabled = false, esp_nametags = true, esp_box = true, esp_transparency = 0.84,
+    esp_enabled = false, esp_nametags = true, esp_transparency = 0.84,
+    box_esp_enabled = false,
     headless_enabled = false, korblox_enabled = false,
     aimbot_enabled = false, aimbot_active = false, aimbot_sticky = false,
     aimbot_smooth = 0.45, aimbot_fov = 220, aimbot_murderer_only = false, aimbot_keybind = "Q",
@@ -805,127 +818,15 @@ getCurrentMap = function()
     return nil
 end
 
--- FIXED: Hero appears YELLOW, Sheriff BLUE, Murderer RED, Innocent GREEN
 getRoleColor = function(plr)
     if not plr or not plr.Character then return Color3.fromRGB(0, 255, 0) end
-    if isMurderer(plr) then return Color3.fromRGB(255, 0, 0) end  -- RED
-    if isHero(plr) then return Color3.fromRGB(255, 255, 0) end     -- YELLOW for Hero
-    if isSheriff(plr) then return Color3.fromRGB(0, 100, 255) end  -- BLUE for Sheriff
-    return Color3.fromRGB(0, 255, 0)                               -- GREEN for Innocent
+    if isMurderer(plr) then return Color3.fromRGB(255, 0, 0) end
+    if isHero(plr) then return Color3.fromRGB(255, 255, 0) end
+    if isSheriff(plr) then return Color3.fromRGB(0, 100, 255) end
+    return Color3.fromRGB(0, 255, 0)
 end
 
 getDisplayName = function(plr) return plr.Name end
-
--- ===== BOX ESP (Drawing-based) =====
-local BoxESP = {}
-local camera = workspace.CurrentCamera
-
-local tan, rad = math.tan, math.rad
-local newVector2 = Vector2.new
-local round = function(...) 
-    local a = {} 
-    for i, v in next, table.pack(...) do 
-        a[i] = math.round(v) 
-    end 
-    return unpack(a) 
-end
-
-local function wtvp(position)
-    local vec, onScreen = camera:WorldToViewportPoint(position)
-    return newVector2(vec.X, vec.Y), onScreen, vec.Z
-end
-
-local function createBoxESP(player)
-    local drawings = {}
-    
-    drawings.box = Drawing.new("Square")
-    drawings.box.Thickness = 1
-    drawings.box.Filled = false
-    drawings.box.Color = getRoleColor(player)
-    drawings.box.Visible = false
-    drawings.box.ZIndex = 2
-    
-    drawings.outline = Drawing.new("Square")
-    drawings.outline.Thickness = 3
-    drawings.outline.Filled = false
-    drawings.outline.Color = Color3.new(0, 0, 0)
-    drawings.outline.Visible = false
-    drawings.outline.ZIndex = 1
-    
-    BoxESP[player] = drawings
-end
-
-local function removeBoxESP(player)
-    if BoxESP[player] then
-        for _, drawing in next, BoxESP[player] do
-            drawing:Remove()
-        end
-        BoxESP[player] = nil
-    end
-end
-
-local function updateBoxESP(player, esp)
-    local character = player and player.Character
-    if character and isAlive(player) then
-        local cframe = character:GetPivot()
-        local position, visible, depth = wtvp(cframe.Position)
-        
-        esp.box.Visible = visible
-        esp.outline.Visible = visible
-        
-        if cframe and visible then
-            local scaleFactor = 1 / (depth * tan(rad(camera.FieldOfView / 2)) * 2) * 1000
-            local width, height = round(4 * scaleFactor, 5 * scaleFactor)
-            local x, y = round(position.X, position.Y)
-            
-            esp.box.Size = newVector2(width, height)
-            esp.box.Position = newVector2(x - width / 2, y - height / 2)
-            esp.box.Color = getRoleColor(player)
-            
-            esp.outline.Size = esp.box.Size
-            esp.outline.Position = esp.box.Position
-        end
-    else
-        esp.box.Visible = false
-        esp.outline.Visible = false
-    end
-end
-
--- Initialize box ESP for existing players
-for _, player in next, Players:GetPlayers() do
-    if player ~= LocalPlayer then
-        createBoxESP(player)
-    end
-end
-
-Players.PlayerAdded:Connect(function(player)
-    if player ~= LocalPlayer then
-        createBoxESP(player)
-    end
-end)
-
-Players.PlayerRemoving:Connect(function(player)
-    removeBoxESP(player)
-end)
-
--- Box ESP update loop
-RunService:BindToRenderStep("BoxESP", Enum.RenderPriority.Camera.Value, function()
-    if not State.esp_enabled or not State.esp_box then
-        for _, drawings in next, BoxESP do
-            if drawings then
-                drawings.box.Visible = false
-                drawings.outline.Visible = false
-            end
-        end
-        return
-    end
-    
-    for player, drawings in next, BoxESP do
-        if drawings and player ~= LocalPlayer and isAlive(player) then
-            updateBoxESP(player, drawings)
-        end
-    end
-end)
 
 -- ===== COSMETIC FUNCTIONS =====
 applyHeadless = function()
@@ -1023,7 +924,7 @@ removeKorblox = function()
     end
 end
 
--- ===== HIGHLIGHT ESP FUNCTIONS =====
+-- ===== ESP FUNCTIONS =====
 CleanupESP = function(char)
     if not char then return end
     local hl = char:FindFirstChild("MM2Highlight")
@@ -1108,14 +1009,27 @@ monitorPlayerBackpack = function(plr)
     if not backpack then return end
     backpack.ChildAdded:Connect(function(tool)
         if tool and (tool.Name == "Knife" or tool.Name == "Gun" or tool.Name == "Revolver") then
-            task.wait(0.1)
-            if State.esp_enabled and plr.Character and isAlive(plr) then CreateESP(plr.Character, plr) end
+            task.wait(0.05)
+            if State.esp_enabled and plr.Character and isAlive(plr) then 
+                CreateESP(plr.Character, plr)
+                if tool.Name == "Gun" or tool.Name == "Revolver" then
+                    local hl = plr.Character:FindFirstChild("MM2Highlight")
+                    if hl then hl.FillColor = getRoleColor(plr) end
+                end
+            end
+            -- Also update box ESP color instantly
+            if State.box_esp_enabled and boxEspCache[plr] then
+                boxEspCache[plr].box.Color = getRoleColor(plr)
+            end
         end
     end)
     backpack.ChildRemoved:Connect(function(tool)
         if tool and (tool.Name == "Knife" or tool.Name == "Gun" or tool.Name == "Revolver") then
-            task.wait(0.1)
+            task.wait(0.05)
             if State.esp_enabled and plr.Character and isAlive(plr) then CreateESP(plr.Character, plr) end
+            if State.box_esp_enabled and boxEspCache[plr] then
+                boxEspCache[plr].box.Color = getRoleColor(plr)
+            end
         end
     end)
 end
@@ -1126,14 +1040,27 @@ monitorCharacterTools = function(plr)
     if not character then return end
     character.ChildAdded:Connect(function(tool)
         if tool and tool:IsA("Tool") and (tool.Name == "Knife" or tool.Name == "Gun" or tool.Name == "Revolver") then
-            task.wait(0.1)
-            if State.esp_enabled and isAlive(plr) then CreateESP(character, plr) end
+            task.wait(0.05)
+            if State.esp_enabled and isAlive(plr) then 
+                CreateESP(character, plr)
+                if tool.Name == "Gun" or tool.Name == "Revolver" then
+                    local hl = character:FindFirstChild("MM2Highlight")
+                    if hl then hl.FillColor = getRoleColor(plr) end
+                end
+            end
+            -- Update box ESP color instantly when gun picked up
+            if State.box_esp_enabled and boxEspCache[plr] then
+                boxEspCache[plr].box.Color = getRoleColor(plr)
+            end
         end
     end)
     character.ChildRemoved:Connect(function(tool)
         if tool and tool:IsA("Tool") and (tool.Name == "Knife" or tool.Name == "Gun" or tool.Name == "Revolver") then
-            task.wait(0.1)
+            task.wait(0.05)
             if State.esp_enabled and isAlive(plr) then CreateESP(character, plr) end
+            if State.box_esp_enabled and boxEspCache[plr] then
+                boxEspCache[plr].box.Color = getRoleColor(plr)
+            end
         end
     end)
 end
@@ -1164,11 +1091,117 @@ task.spawn(function()
     while task.wait(0.5) do if State.esp_enabled then UpdateAllESPColors() end end
 end)
 
--- ===== GUN ESP (FIXED: PURPLE, ALL MAPS) =====
+-- ===== 2D BOX ESP (ROLE-BASED COLORS - INSTANT HERO DETECTION) =====
+local boxEspCache = {}
+local camera = workspace.CurrentCamera
+
+local function createBoxEsp(player)
+    local drawings = {}
+    
+    drawings.box = Drawing.new("Square")
+    drawings.box.Thickness = 2
+    drawings.box.Filled = false
+    drawings.box.Color = getRoleColor(player)
+    drawings.box.Visible = false
+    drawings.box.ZIndex = 2
+
+    drawings.boxoutline = Drawing.new("Square")
+    drawings.boxoutline.Thickness = 3
+    drawings.boxoutline.Filled = false
+    drawings.boxoutline.Color = Color3.fromRGB(0, 0, 0)
+    drawings.boxoutline.Visible = false
+    drawings.boxoutline.ZIndex = 1
+
+    boxEspCache[player] = drawings
+end
+
+local function removeBoxEsp(player)
+    if boxEspCache[player] then
+        for _, drawing in pairs(boxEspCache[player]) do
+            drawing:Remove()
+        end
+        boxEspCache[player] = nil
+    end
+end
+
+local function updateBoxEsp(player, esp)
+    local character = player and player.Character
+    if character and isAlive(player) then
+        local hrp = character:FindFirstChild("HumanoidRootPart")
+        local head = character:FindFirstChild("Head")
+        if not hrp and not head then
+            esp.box.Visible = false
+            esp.boxoutline.Visible = false
+            return
+        end
+        
+        local rootPart = hrp or head
+        local position, onScreen = camera:WorldToViewportPoint(rootPart.Position)
+        
+        esp.box.Visible = onScreen
+        esp.boxoutline.Visible = onScreen
+
+        if onScreen then
+            -- Calculate box size based on distance
+            local scaleFactor = 1 / (position.Z * math.tan(math.rad(camera.FieldOfView / 2)) * 2) * 1000
+            local width = math.round(4 * scaleFactor)
+            local height = math.round(5 * scaleFactor)
+            local x, y = math.round(position.X), math.round(position.Y)
+
+            esp.box.Size = Vector2.new(width, height)
+            esp.box.Position = Vector2.new(math.round(x - width / 2), math.round(y - height / 2))
+            -- Update color every frame to ensure instant role changes
+            esp.box.Color = getRoleColor(player)
+
+            esp.boxoutline.Size = esp.box.Size
+            esp.boxoutline.Position = esp.box.Position
+        end
+    else
+        esp.box.Visible = false
+        esp.boxoutline.Visible = false
+    end
+end
+
+-- Initialize box ESP for existing players
+for _, player in pairs(Players:GetPlayers()) do
+    if player ~= LocalPlayer then
+        createBoxEsp(player)
+    end
+end
+
+Players.PlayerAdded:Connect(function(player)
+    if player ~= LocalPlayer then
+        createBoxEsp(player)
+    end
+end)
+
+Players.PlayerRemoving:Connect(function(player)
+    removeBoxEsp(player)
+end)
+
+-- Update box ESP every frame
+RunService:BindToRenderStep("BoxESP", Enum.RenderPriority.Camera.Value, function()
+    if not State.box_esp_enabled then
+        for player, drawings in pairs(boxEspCache) do
+            if drawings then
+                drawings.box.Visible = false
+                drawings.boxoutline.Visible = false
+            end
+        end
+        return
+    end
+    
+    for player, drawings in pairs(boxEspCache) do
+        if drawings and player ~= LocalPlayer then
+            updateBoxEsp(player, drawings)
+        end
+    end
+end)
+
+-- ===== GUN ESP =====
 CurrentGunTracer = nil
 BoxHandles = {}
 
--- Function to find GunDrop on ANY map
 findGunDrop = function()
     for _, obj in ipairs(Workspace:GetDescendants()) do
         if obj:IsA("BasePart") and obj.Name == "GunDrop" then
@@ -1530,7 +1563,7 @@ end
 getBestTarget = function()
     if not State.aimbot_enabled or not State.aimbot_active then return nil end
     if State.aimbot_sticky and LockedTarget and isAlive(LockedTarget) then return LockedTarget end
-    local camera = workspace.CurrentCamera
+    local camera = Workspace.CurrentCamera
     local mousePos = UserInputService:GetMouseLocation()
     local bestTarget, bestScore = nil, math.huge
     for _, plr in ipairs(Players:GetPlayers()) do
@@ -1565,7 +1598,7 @@ updateAimbot = function()
     if not targetPart then targetPart = targetPlr.Character:FindFirstChild("HumanoidRootPart") end
     if not targetPart then return end
     local predictedPos = predictPlayerPositionAdvanced(targetPlr, targetPart)
-    local camera = workspace.CurrentCamera
+    local camera = Workspace.CurrentCamera
     local currentCFrame = camera.CFrame
     local targetCFrame = CFrame.new(currentCFrame.Position, predictedPos)
     local smooth = isMurderer(targetPlr) and 0.78 or State.aimbot_smooth
@@ -1605,7 +1638,7 @@ performFlickShoot = function()
     if not targetPart then targetPart = targetPlr.Character:FindFirstChild("HumanoidRootPart") end
     if not targetPart then return end
     local targetPos = predictPlayerPositionAdvanced(targetPlr, targetPart)
-    local camera = workspace.CurrentCamera
+    local camera = Workspace.CurrentCamera
     local startCFrame = camera.CFrame
     local targetCFrame = CFrame.new(camera.CFrame.Position, targetPos)
     local startTime = tick()
@@ -1953,7 +1986,7 @@ enableGodMode = function()
         newHumanoid.Name = "Humanoid"
         task.wait(0.1)
         if character["1"] then character["1"]:Destroy() end
-        workspace.CurrentCamera.CameraSubject = character
+        Workspace.CurrentCamera.CameraSubject = character
         if character:FindFirstChild("Animate") then
             character.Animate.Disabled = true
             task.wait(0.1)
@@ -2451,16 +2484,29 @@ VisualsPlayerSection:AddToggle({
     Default = true,
     Callback = function(v) State.esp_nametags = v; if State.esp_enabled then ForceRefreshESP() end end,
 })
-VisualsPlayerSection:AddToggle({
-    Name = "Enable Box ESP",
-    Flag = "BoxESP_Enabled",
-    Default = true,
-    Callback = function(v) State.esp_box = v; end
-})
 VisualsPlayerSection:AddSlider({
     Name = "Highlight Fill Transparency",
     Min = 0, Max = 1, Default = 0.84, Round = 2, Flag = "FillTransparency_Value",
     Callback = function(v) State.esp_transparency = v; UpdateAllESPColors() end
+})
+
+-- 2D Box ESP Toggle
+VisualsPlayerSection:AddToggle({
+    Name = "Enable 2D Box ESP",
+    Flag = "BoxESP_Enabled",
+    Default = false,
+    Callback = function(v)
+        State.box_esp_enabled = v
+        if not v then
+            for player, drawings in pairs(boxEspCache) do
+                if drawings then
+                    drawings.box.Visible = false
+                    drawings.boxoutline.Visible = false
+                end
+            end
+        end
+        Notifier.new({Title="2D Box ESP", Content=v and "ENABLED" or "DISABLED", Duration=2})
+    end,
 })
 
 VisualsGunSection = VisualsTab:DrawSection({ Name = "Gun ESP", Position = 'right' })
@@ -2572,7 +2618,7 @@ SheriffSilentSection:AddToggle({
     Name = "Enable Silent Aim",
     Flag = "SilentAim_Enabled",
     Default = false,
-    Callback = function(v) silentAimEnabled = v; Notifier.new({Title="Silent Aim", Content=v and "Enabled - MASTER CONTROL" or "Disabled", Duration=2}) end,
+    Callback = function(v) silentAimEnabled = v; Notifier.new({Title="Silent Aim", Content=v and "Enabled" or "Disabled", Duration=2}) end,
 })
 SheriffSilentSection:AddToggle({
     Name = "Activate Only While Holding Shift",
@@ -2589,7 +2635,7 @@ SheriffSilentHackerSection:AddToggle({
     Callback = function(v)
         State.silent_hacker_enabled = v
         if not v and State.silent_hacker_active then stopSilentHacker() end
-        Notifier.new({Title="Silent Hacker", Content=v and "READY - SHOOT TO TELEPORT BEHIND + AUTO AIM (BUILT-IN + ANTI-EXPLOIT PRED)" or "Disabled", Duration=3})
+        Notifier.new({Title="Silent Hacker", Content=v and "READY - SHOOT TO TELEPORT BEHIND + AUTO AIM" or "Disabled", Duration=3})
     end,
 })
 SheriffSilentHackerSection:AddSlider({
@@ -2617,7 +2663,7 @@ SheriffTriggerSection:AddToggle({
 SheriffGunTPSection = SheriffTab:DrawSection({ Name = "Gun Teleporter", Position = 'right' })
 SheriffGunTPSection:AddButton({ Name = "Teleport to Gun (Snap Back)", Callback = TeleportToGunSnapBack })
 SheriffGunTPSection:AddToggle({ Name = "Enable Auto Teleport to Gun", Flag = "AutoGunTP_Enabled", Default = false, Callback = function(v) State.gun_autotp = v end })
-SheriffGunTPSection:AddParagraph({ title = "Info", text = "Teleports you to dropped gun and snaps back. Auto TP works when gun drops." })
+SheriffGunTPSection:AddParagraph({ title = "Info", text = "Teleports you to dropped gun and snaps back." })
 
 -- ===== MURDERER TAB =====
 MurdererTab = Window:DrawTab({ Name = "Murderer", Icon = "sword", EnableScrolling = true })
@@ -2702,9 +2748,8 @@ MovementInfiniteJumpSection:AddToggle({
         Notifier.new({Title="Infinite Jump", Content=v and "Enabled - Press SPACE to fly!" or "Disabled", Duration=2})
     end,
 })
-MovementInfiniteJumpSection:AddParagraph({ title = "How to use:", text = "Simply press SPACE repeatedly to jump infinitely! Works mid-air." })
 
-MovementSpeedSection = MovementTab:DrawSection({ Name = "Speed Boost (PC) (Hold Shift)", Position = 'left' })
+MovementSpeedSection = MovementTab:DrawSection({ Name = "Speed Boost (Hold Shift)", Position = 'left' })
 MovementSpeedSection:AddToggle({
     Name = "Enable Speed Boost",
     Flag = "SpeedBoost_Enabled",
@@ -2747,12 +2792,8 @@ FPSBoosterSection:AddToggle({
     Default = false,
     Callback = function(v)
         ToggleFPSBooster(v)
-        Notifier.new({Title="FPS Booster", Content=v and "ENABLED - Effects disabled" or "DISABLED - Graphics restored", Duration=3})
+        Notifier.new({Title="FPS Booster", Content=v and "ENABLED" or "DISABLED", Duration=3})
     end,
-})
-FPSBoosterSection:AddParagraph({
-    title = "What this does:",
-    text = "- Disables all Textures\n- Disables Visual Effects\n- Optimizes Parts\n- Disables Particles\n- Removes Skybox",
 })
 
 -- ===== EXPLOIT TAB =====
@@ -2774,7 +2815,7 @@ DesyncToggle = ExploitDesyncSection:AddToggle({
     Default = false,
     Callback = function(v)
         State.desync_enabled = v
-        if not v then State.desync_active = false getgenv().Desync.Enabled = false getgenv().Desync.AutoAvoidActive = false end
+        if not v then State.desync_active = false getgenv().Desync.Enabled = false end
     end,
 })
 ExploitDesyncSection:AddKeybind({ Name = "Desync Toggle Keybind", Default = "Z", Flag = "Desync_Keybind", Callback = function(v) State.desync_keybind = v end })
@@ -2786,10 +2827,6 @@ ExploitMethodSettingsSection:AddSlider({ Name = "Random Distance", Min = 10, Max
 ExploitMethodSettingsSection:AddSlider({ Name = "Oscillate Distance", Min = 10, Max = 200, Default = 50, Round = 0, Flag = "Oscillate_Distance", Callback = function(v) getgenv().Desync.OscillateDistance = v end })
 ExploitMethodSettingsSection:AddSlider({ Name = "Oscillate Speed", Min = 1, Max = 20, Default = 5, Round = 1, Flag = "Oscillate_Speed", Callback = function(v) getgenv().Desync.OscillateSpeed = v end })
 ExploitMethodSettingsSection:AddSlider({ Name = "Spin Speed", Min = 5, Max = 100, Default = 20, Round = 0, Flag = "Spin_Speed", Callback = function(v) getgenv().Desync.SpinSpeed = v end })
-
-ExploitAutoAvoidSection = ExploitTab:DrawSection({ Name = "Auto Avoid Murderer", Position = 'right' })
-ExploitAutoAvoidSection:AddToggle({ Name = "Enable Auto Avoid Murderer", Flag = "AutoAvoid_Murderer", Default = false, Callback = function(v) getgenv().Desync.AutoAvoidMurderer = v; Notifier.new({Title="Auto Avoid", Content=v and "Enabled" or "Disabled", Duration=2}) end })
-ExploitAutoAvoidSection:AddSlider({ Name = "Avoid Distance (studs)", Min = 5, Max = 50, Default = 20, Round = 0, Flag = "Avoid_Distance", Callback = function(v) getgenv().Desync.AvoidDistance = v end })
 
 -- ===== PLAYERS TAB =====
 PlayersTab = Window:DrawTab({ Name = "Players", Icon = "contact", EnableScrolling = true })
@@ -2892,12 +2929,12 @@ PlayersActionsSection:AddToggle({
             if not SelectedPlayerName then Notifier.new({Title="Spectate", Content="Select a player first", Duration=2.5}) return end
             local target = Players:FindFirstChild(SelectedPlayerName)
             if target and target.Character and target.Character:FindFirstChild("Humanoid") then
-                OriginalCameraSubject = workspace.CurrentCamera.CameraSubject
-                workspace.CurrentCamera.CameraSubject = target.Character.Humanoid
+                OriginalCameraSubject = Workspace.CurrentCamera.CameraSubject
+                Workspace.CurrentCamera.CameraSubject = target.Character.Humanoid
                 Notifier.new({Title="Spectating", Content=SelectedPlayerName, Duration=3})
             end
         elseif OriginalCameraSubject then
-            workspace.CurrentCamera.CameraSubject = OriginalCameraSubject
+            Workspace.CurrentCamera.CameraSubject = OriginalCameraSubject
             OriginalCameraSubject = nil
             Notifier.new({Title="Spectate", Content="Stopped", Duration=2})
         end
@@ -2910,8 +2947,7 @@ AutoFarmSection = AutoFarmTab:DrawSection({ Name = "Coin Collector", Position = 
 AutoFarmSection:AddToggle({ Name = "Enable Auto Farm", Flag = "AutoFarm_Enabled", Default = false, Callback = function(v) toggleAutoFarm() end })
 AutoFarmSection:AddToggle({ Name = "Show Coin ESP", Flag = "AutoFarm_ESP", Default = false, Callback = function(v) toggleAutoFarmESP() end })
 AutoFarmSection:AddDropdown({ Name = "Collection Mode", Flag = "AutoFarm_Mode", Default = "DESYNC", Values = {"DESYNC", "TWEEN"}, Callback = function(v) setAutoFarmMode(v) end })
-AutoFarmSection:AddSlider({ Name = "Tween Speed (1 = Fast, 100 = Slow)", Min = 1, Max = 100, Default = 50, Flag = "Tween_Speed", Callback = function(v) setTweenSpeed(v); local speedSeconds = 0.3 + (v / 100) * 2.7; Notifier.new({Title="Tween Speed", Content=string.format("%.1f seconds per coin", speedSeconds), Duration=2}) end })
-AutoFarmSection:AddParagraph({ title = "Auto Farm Info", text = "Automatically collects all coins" })
+AutoFarmSection:AddSlider({ Name = "Tween Speed (1 = Fast, 100 = Slow)", Min = 1, Max = 100, Default = 50, Flag = "Tween_Speed", Callback = function(v) setTweenSpeed(v) end })
 
 -- ===== SETTINGS TAB =====
 Window:DrawCategory({ Name = "Settings" })
@@ -2921,7 +2957,6 @@ UISettingsSection:AddToggle({ Name = "Always Show Frame", Default = false, Callb
 UISettingsSection:AddColorPicker({ Name = "Highlight Color", Default = Compkiller.Colors.Highlight, Callback = function(v) Compkiller.Colors.Highlight = v; Compkiller:RefreshCurrentColor() end })
 UISettingsSection:AddColorPicker({ Name = "Toggle Color", Default = Compkiller.Colors.Toggle, Callback = function(v) Compkiller.Colors.Toggle = v; Compkiller:RefreshCurrentColor() end })
 UISettingsSection:AddColorPicker({ Name = "Background Color", Default = Compkiller.Colors.BGDBColor, Callback = function(v) Compkiller.Colors.BGDBColor = v; Compkiller:RefreshCurrentColor() end })
-UISettingsSection:AddButton({ Name = "Get Theme", Callback = function() Notifier.new({Title="Theme", Content="Copied to clipboard", Duration=3}) end })
 
 ThemeSection = SettingsTab:DrawSection({ Name = "UI Themes", Position = 'right' })
 ThemeSection:AddDropdown({ Name = "Select Theme", Default = "Dark Blue", Values = {"Default", "Dark Green", "Dark Blue", "Purple Rose", "Skeet"}, Callback = function(v) Compkiller:SetTheme(v) end })
@@ -2935,5 +2970,3 @@ task.spawn(function()
     Compkiller:SetTheme("Dark Blue")
     Notifier.new({ Title = "Theme Applied", Content = "Dark Blue theme loaded!", Duration = 4, Icon = "paint-brush" })
 end)
-
-Notifier.new({ Title = "MM2 Script", Content = "Successfully Loaded", Duration = 8 })
