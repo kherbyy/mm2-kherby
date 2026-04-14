@@ -1,3 +1,10 @@
+-- ============================================
+--   FULL MM2 SCRIPT with HERO DETECTION
+--   Heroes appear YELLOW in ESP
+--   GUN ESP: PURPLE (Fixed for all maps)
+--   BOX ESP ADDED (color changes by role)
+-- ============================================
+
 Compkiller = loadstring(game:HttpGet("https://raw.githubusercontent.com/4lpaca-pin/CompKiller/refs/heads/main/src/source.luau"))();
 Notifier = Compkiller.newNotify();
 ConfigManager = Compkiller:ConfigManager({
@@ -6,7 +13,7 @@ ConfigManager = Compkiller:ConfigManager({
 });
 Compkiller:Loader("rbxassetid://120245531583106", 2.5):yield();
 
--- ERROR FILTERS (keep these local – they are few)
+-- ERROR FILTERS
 local oldPrint = print
 print = function(...)
     local args = {...}
@@ -33,7 +40,7 @@ warn = function(...)
     oldWarn(...)
 end
 
--- SERVICES (globals)
+-- SERVICES
 ReplicatedStorage = game:GetService("ReplicatedStorage")
 Players = game:GetService("Players")
 UserInputService = game:GetService("UserInputService")
@@ -44,7 +51,7 @@ TweenService = game:GetService("TweenService")
 LocalPlayer = Players.LocalPlayer
 mouse = LocalPlayer:GetMouse()
 
--- HELPER (local is fine)
+-- HELPER
 local function StringToKeyCode(str)
     if not str or str == "" then return nil end
     str = string.upper(str)
@@ -153,7 +160,7 @@ getgenv().CosmeticBackup = {
 
 -- ===== GLOBAL STATE =====
 getgenv().MM2State = {
-    esp_enabled = false, esp_nametags = true, esp_transparency = 0.84,
+    esp_enabled = false, esp_nametags = true, esp_box = true, esp_transparency = 0.84,
     headless_enabled = false, korblox_enabled = false,
     aimbot_enabled = false, aimbot_active = false, aimbot_sticky = false,
     aimbot_smooth = 0.45, aimbot_fov = 220, aimbot_murderer_only = false, aimbot_keybind = "Q",
@@ -809,6 +816,117 @@ end
 
 getDisplayName = function(plr) return plr.Name end
 
+-- ===== BOX ESP (Drawing-based) =====
+local BoxESP = {}
+local camera = workspace.CurrentCamera
+
+local tan, rad = math.tan, math.rad
+local newVector2 = Vector2.new
+local round = function(...) 
+    local a = {} 
+    for i, v in next, table.pack(...) do 
+        a[i] = math.round(v) 
+    end 
+    return unpack(a) 
+end
+
+local function wtvp(position)
+    local vec, onScreen = camera:WorldToViewportPoint(position)
+    return newVector2(vec.X, vec.Y), onScreen, vec.Z
+end
+
+local function createBoxESP(player)
+    local drawings = {}
+    
+    drawings.box = Drawing.new("Square")
+    drawings.box.Thickness = 1
+    drawings.box.Filled = false
+    drawings.box.Color = getRoleColor(player)
+    drawings.box.Visible = false
+    drawings.box.ZIndex = 2
+    
+    drawings.outline = Drawing.new("Square")
+    drawings.outline.Thickness = 3
+    drawings.outline.Filled = false
+    drawings.outline.Color = Color3.new(0, 0, 0)
+    drawings.outline.Visible = false
+    drawings.outline.ZIndex = 1
+    
+    BoxESP[player] = drawings
+end
+
+local function removeBoxESP(player)
+    if BoxESP[player] then
+        for _, drawing in next, BoxESP[player] do
+            drawing:Remove()
+        end
+        BoxESP[player] = nil
+    end
+end
+
+local function updateBoxESP(player, esp)
+    local character = player and player.Character
+    if character and isAlive(player) then
+        local cframe = character:GetPivot()
+        local position, visible, depth = wtvp(cframe.Position)
+        
+        esp.box.Visible = visible
+        esp.outline.Visible = visible
+        
+        if cframe and visible then
+            local scaleFactor = 1 / (depth * tan(rad(camera.FieldOfView / 2)) * 2) * 1000
+            local width, height = round(4 * scaleFactor, 5 * scaleFactor)
+            local x, y = round(position.X, position.Y)
+            
+            esp.box.Size = newVector2(width, height)
+            esp.box.Position = newVector2(x - width / 2, y - height / 2)
+            esp.box.Color = getRoleColor(player)
+            
+            esp.outline.Size = esp.box.Size
+            esp.outline.Position = esp.box.Position
+        end
+    else
+        esp.box.Visible = false
+        esp.outline.Visible = false
+    end
+end
+
+-- Initialize box ESP for existing players
+for _, player in next, Players:GetPlayers() do
+    if player ~= LocalPlayer then
+        createBoxESP(player)
+    end
+end
+
+Players.PlayerAdded:Connect(function(player)
+    if player ~= LocalPlayer then
+        createBoxESP(player)
+    end
+end)
+
+Players.PlayerRemoving:Connect(function(player)
+    removeBoxESP(player)
+end)
+
+-- Box ESP update loop
+RunService:BindToRenderStep("BoxESP", Enum.RenderPriority.Camera.Value, function()
+    if not State.esp_enabled or not State.esp_box then
+        for _, drawings in next, BoxESP do
+            if drawings then
+                drawings.box.Visible = false
+                drawings.outline.Visible = false
+            end
+        end
+        return
+    end
+    
+    for player, drawings in next, BoxESP do
+        if drawings and player ~= LocalPlayer and isAlive(player) then
+            updateBoxESP(player, drawings)
+        end
+    end
+end)
+
 -- ===== COSMETIC FUNCTIONS =====
 applyHeadless = function()
     if not State.headless_enabled then return end
@@ -905,7 +1023,7 @@ removeKorblox = function()
     end
 end
 
--- ===== ESP FUNCTIONS =====
+-- ===== HIGHLIGHT ESP FUNCTIONS =====
 CleanupESP = function(char)
     if not char then return end
     local hl = char:FindFirstChild("MM2Highlight")
@@ -1412,7 +1530,7 @@ end
 getBestTarget = function()
     if not State.aimbot_enabled or not State.aimbot_active then return nil end
     if State.aimbot_sticky and LockedTarget and isAlive(LockedTarget) then return LockedTarget end
-    local camera = Workspace.CurrentCamera
+    local camera = workspace.CurrentCamera
     local mousePos = UserInputService:GetMouseLocation()
     local bestTarget, bestScore = nil, math.huge
     for _, plr in ipairs(Players:GetPlayers()) do
@@ -1447,7 +1565,7 @@ updateAimbot = function()
     if not targetPart then targetPart = targetPlr.Character:FindFirstChild("HumanoidRootPart") end
     if not targetPart then return end
     local predictedPos = predictPlayerPositionAdvanced(targetPlr, targetPart)
-    local camera = Workspace.CurrentCamera
+    local camera = workspace.CurrentCamera
     local currentCFrame = camera.CFrame
     local targetCFrame = CFrame.new(currentCFrame.Position, predictedPos)
     local smooth = isMurderer(targetPlr) and 0.78 or State.aimbot_smooth
@@ -1487,7 +1605,7 @@ performFlickShoot = function()
     if not targetPart then targetPart = targetPlr.Character:FindFirstChild("HumanoidRootPart") end
     if not targetPart then return end
     local targetPos = predictPlayerPositionAdvanced(targetPlr, targetPart)
-    local camera = Workspace.CurrentCamera
+    local camera = workspace.CurrentCamera
     local startCFrame = camera.CFrame
     local targetCFrame = CFrame.new(camera.CFrame.Position, targetPos)
     local startTime = tick()
@@ -1835,7 +1953,7 @@ enableGodMode = function()
         newHumanoid.Name = "Humanoid"
         task.wait(0.1)
         if character["1"] then character["1"]:Destroy() end
-        Workspace.CurrentCamera.CameraSubject = character
+        workspace.CurrentCamera.CameraSubject = character
         if character:FindFirstChild("Animate") then
             character.Animate.Disabled = true
             task.wait(0.1)
@@ -2333,6 +2451,12 @@ VisualsPlayerSection:AddToggle({
     Default = true,
     Callback = function(v) State.esp_nametags = v; if State.esp_enabled then ForceRefreshESP() end end,
 })
+VisualsPlayerSection:AddToggle({
+    Name = "Enable Box ESP",
+    Flag = "BoxESP_Enabled",
+    Default = true,
+    Callback = function(v) State.esp_box = v; end
+})
 VisualsPlayerSection:AddSlider({
     Name = "Highlight Fill Transparency",
     Min = 0, Max = 1, Default = 0.84, Round = 2, Flag = "FillTransparency_Value",
@@ -2768,12 +2892,12 @@ PlayersActionsSection:AddToggle({
             if not SelectedPlayerName then Notifier.new({Title="Spectate", Content="Select a player first", Duration=2.5}) return end
             local target = Players:FindFirstChild(SelectedPlayerName)
             if target and target.Character and target.Character:FindFirstChild("Humanoid") then
-                OriginalCameraSubject = Workspace.CurrentCamera.CameraSubject
-                Workspace.CurrentCamera.CameraSubject = target.Character.Humanoid
+                OriginalCameraSubject = workspace.CurrentCamera.CameraSubject
+                workspace.CurrentCamera.CameraSubject = target.Character.Humanoid
                 Notifier.new({Title="Spectating", Content=SelectedPlayerName, Duration=3})
             end
         elseif OriginalCameraSubject then
-            Workspace.CurrentCamera.CameraSubject = OriginalCameraSubject
+            workspace.CurrentCamera.CameraSubject = OriginalCameraSubject
             OriginalCameraSubject = nil
             Notifier.new({Title="Spectate", Content="Stopped", Duration=2})
         end
@@ -2811,3 +2935,5 @@ task.spawn(function()
     Compkiller:SetTheme("Dark Blue")
     Notifier.new({ Title = "Theme Applied", Content = "Dark Blue theme loaded!", Duration = 4, Icon = "paint-brush" })
 end)
+
+Notifier.new({ Title = "MM2 Script", Content = "Successfully Loaded", Duration = 8 })
