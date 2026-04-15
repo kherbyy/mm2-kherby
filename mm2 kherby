@@ -2,7 +2,8 @@
 --   FULL MM2 SCRIPT with HERO DETECTION
 --   Heroes appear YELLOW instantly when picking up gun!
 --   GUN ESP: PURPLE (Fixed for all maps)
---   2D BOX ESP: Role-based colors!
+--   2D BOX ESP: NORMAL SIZE (Role-based colors)
+--   GOD MODE: Only activates when round starts!
 -- ============================================
 
 Compkiller = loadstring(game:HttpGet("https://raw.githubusercontent.com/4lpaca-pin/CompKiller/refs/heads/main/src/source.luau"))();
@@ -1017,7 +1018,6 @@ monitorPlayerBackpack = function(plr)
                     if hl then hl.FillColor = getRoleColor(plr) end
                 end
             end
-            -- Also update box ESP color instantly
             if State.box_esp_enabled and boxEspCache[plr] then
                 boxEspCache[plr].box.Color = getRoleColor(plr)
             end
@@ -1048,7 +1048,6 @@ monitorCharacterTools = function(plr)
                     if hl then hl.FillColor = getRoleColor(plr) end
                 end
             end
-            -- Update box ESP color instantly when gun picked up
             if State.box_esp_enabled and boxEspCache[plr] then
                 boxEspCache[plr].box.Color = getRoleColor(plr)
             end
@@ -1091,7 +1090,7 @@ task.spawn(function()
     while task.wait(0.5) do if State.esp_enabled then UpdateAllESPColors() end end
 end)
 
--- ===== 2D BOX ESP (ROLE-BASED COLORS - INSTANT HERO DETECTION) =====
+-- ===== 2D BOX ESP (NORMAL SIZE - ROLE-BASED COLORS) =====
 local boxEspCache = {}
 local camera = workspace.CurrentCamera
 
@@ -1142,7 +1141,7 @@ local function updateBoxEsp(player, esp)
         esp.boxoutline.Visible = onScreen
 
         if onScreen then
-            -- Calculate box size based on distance
+            -- NORMAL SIZE box (original size from your script)
             local scaleFactor = 1 / (position.Z * math.tan(math.rad(camera.FieldOfView / 2)) * 2) * 1000
             local width = math.round(4 * scaleFactor)
             local height = math.round(5 * scaleFactor)
@@ -1150,7 +1149,6 @@ local function updateBoxEsp(player, esp)
 
             esp.box.Size = Vector2.new(width, height)
             esp.box.Position = Vector2.new(math.round(x - width / 2), math.round(y - height / 2))
-            -- Update color every frame to ensure instant role changes
             esp.box.Color = getRoleColor(player)
 
             esp.boxoutline.Size = esp.box.Size
@@ -1162,7 +1160,6 @@ local function updateBoxEsp(player, esp)
     end
 end
 
--- Initialize box ESP for existing players
 for _, player in pairs(Players:GetPlayers()) do
     if player ~= LocalPlayer then
         createBoxEsp(player)
@@ -1179,7 +1176,6 @@ Players.PlayerRemoving:Connect(function(player)
     removeBoxEsp(player)
 end)
 
--- Update box ESP every frame
 RunService:BindToRenderStep("BoxESP", Enum.RenderPriority.Camera.Value, function()
     if not State.box_esp_enabled then
         for player, drawings in pairs(boxEspCache) do
@@ -1974,9 +1970,22 @@ respawn = function()
     end
 end
 
--- ===== GOD MODE =====
+-- ===== GOD MODE WITH ROUND DETECTION =====
+local godModeRequested = false
+local godModeActive = false
+local roundActive = false
+
+local originalEnableGodMode = enableGodMode
+
 enableGodMode = function()
     if not State.godmode_enabled then return end
+    
+    if not roundActive then
+        godModeRequested = true
+        Notifier.new({Title="God Mode", Content="Will activate when round starts!", Duration=3})
+        return
+    end
+    
     local character = LocalPlayer.Character
     if character and character:FindFirstChild("Humanoid") then
         local humanoid = character.Humanoid
@@ -1993,8 +2002,62 @@ enableGodMode = function()
             character.Animate.Disabled = false
         end
         newHumanoid.DisplayDistanceType = "None"
+        godModeActive = true
+        Notifier.new({Title="God Mode", Content="ACTIVATED!", Duration=2})
+        return true
+    end
+    return false
+end
+
+local function onRoundStart()
+    roundActive = true
+    task.wait(1.5)
+    if State.godmode_enabled then
+        enableGodMode()
+    elseif godModeRequested then
+        enableGodMode()
+        godModeRequested = false
     end
 end
+
+local function onRoundEnd()
+    roundActive = false
+    godModeActive = false
+end
+
+local gameplayRemotes = ReplicatedStorage:FindFirstChild("Remotes")
+if gameplayRemotes then
+    gameplayRemotes = gameplayRemotes:FindFirstChild("Gameplay")
+    if gameplayRemotes then
+        local roundStartEvent = gameplayRemotes:FindFirstChild("RoundStart")
+        if roundStartEvent then
+            roundStartEvent.OnClientEvent:Connect(function(time, playerData)
+                onRoundStart()
+            end)
+        end
+        
+        local roundEndEvent = gameplayRemotes:FindFirstChild("RoundEndFade")
+        if roundEndEvent then
+            roundEndEvent.OnClientEvent:Connect(function()
+                onRoundEnd()
+            end)
+        end
+        
+        local mapLoadEvent = gameplayRemotes:FindFirstChild("LoadingMap")
+        if mapLoadEvent then
+            mapLoadEvent.OnClientEvent:Connect(function(mapName)
+                Notifier.new({Title="Loading Map", Content=mapName, Duration=2})
+            end)
+        end
+    end
+end
+
+LocalPlayer.CharacterAdded:Connect(function(character)
+    task.wait(2)
+    if State.godmode_enabled and roundActive then
+        enableGodMode()
+    end
+end)
 
 -- ===== ANTI-FLING =====
 antiFlingConnection = nil
@@ -2306,8 +2369,18 @@ UserInputService.InputBegan:Connect(function(input, gp)
             return
         end
         State.godmode_enabled = not State.godmode_enabled
-        if State.godmode_enabled then enableGodMode() end
-        Notifier.new({Title="God Mode", Content=State.godmode_enabled and "ON" or "OFF", Duration=1.5})
+        if State.godmode_enabled then
+            if roundActive then
+                enableGodMode()
+            else
+                godModeRequested = true
+                Notifier.new({Title="God Mode", Content="Will activate when round starts!", Duration=3})
+            end
+        else
+            godModeRequested = false
+            godModeActive = false
+            Notifier.new({Title="God Mode", Content="OFF", Duration=2})
+        end
     elseif input.KeyCode == StringToKeyCode(State.aimbot_keybind) then
         if not State.aimbot_enabled then
             Notifier.new({Title="Aimbot", Content="Enable Aimbot in UI first", Duration=3})
@@ -2804,7 +2877,21 @@ ExploitSurvivalSection:AddToggle({
     Flag = "GodMode_Enabled",
     Default = false,
     Risky = true,
-    Callback = function(v) State.godmode_enabled = v; if v then enableGodMode() end; Notifier.new({Title="God Mode", Content=v and "ON" or "OFF", Duration=2}) end,
+    Callback = function(v)
+        State.godmode_enabled = v
+        if v then
+            if roundActive then
+                enableGodMode()
+            else
+                godModeRequested = true
+                Notifier.new({Title="God Mode", Content="Will activate when round starts!", Duration=3})
+            end
+        else
+            godModeRequested = false
+            godModeActive = false
+            Notifier.new({Title="God Mode", Content="DISABLED", Duration=2})
+        end
+    end,
 })
 ExploitSurvivalSection:AddKeybind({ Name = "God Mode Keybind", Default = "G", Flag = "GodMode_Keybind", Callback = function(v) State.godmode_keybind = v end })
 
