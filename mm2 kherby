@@ -1,11 +1,3 @@
--- ============================================
---   FULL MM2 SCRIPT with HERO DETECTION
---   Heroes appear YELLOW instantly when picking up gun!
---   GUN ESP: PURPLE (Fixed for all maps)
---   2D BOX ESP: NORMAL SIZE (Role-based colors)
---   GOD MODE: Only activates when round starts!
--- ============================================
-
 Compkiller = loadstring(game:HttpGet("https://raw.githubusercontent.com/4lpaca-pin/CompKiller/refs/heads/main/src/source.luau"))();
 Notifier = Compkiller.newNotify();
 ConfigManager = Compkiller:ConfigManager({
