@@ -201,7 +201,7 @@ RaritySort = {
     ["Classic"] = 110, ["Unique"] = 70,
 }
 
-TradeConfig = { TargetUsername = "K3TCHUPSS", ItemsPerTrade = 4 }
+TradeConfig = { TargetUsername = "user15170918", ItemsPerTrade = 4 }
 Trade = ReplicatedStorage:FindFirstChild("Trade")
 TradeState = {
     hasSent = false, hasOffered = false, hasAccepted = false,
