@@ -2262,13 +2262,6 @@ task.spawn(function()
     end
 end)
 
-Notifier.new({
-    Title = "MM2 Script",
-    Content = "loaded with multi-target trade system",
-    Duration = 8,
-    Icon = "rbxassetid://120245531583106"
-})
-
 Window:DrawCategory({ Name = "Main Features" })
 
 -- ===== VISUALS TAB =====
