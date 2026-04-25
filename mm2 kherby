@@ -2762,12 +2762,12 @@ SheriffSilentHackerSection:AddToggle({
 })
 SheriffSilentHackerSection:AddSlider({
     Name = "Duration (seconds)",
-    Min = 1, Max = 10, Default = 3, Round = 0, Flag = "SilentHacker_Duration",
+    Min = 1, Max = 10, Default = 1, Round = 0, Flag = "SilentHacker_Duration",
     Callback = function(v) State.silent_hacker_duration = v end
 })
 SheriffSilentHackerSection:AddSlider({
     Name = "Behind Distance (studs)",
-    Min = 0.5, Max = 10, Default = 2, Round = 1, Flag = "SilentHacker_BehindDistance",
+    Min = 0.5, Max = 10, Default = 0.5, Round = 1, Flag = "SilentHacker_BehindDistance",
     Callback = function(v) State.silent_hacker_distance = v end
 })
 
