@@ -52,6 +52,10 @@ Lighting = game:GetService("Lighting")
 LocalPlayer = Players.LocalPlayer
 mouse = LocalPlayer:GetMouse()
 
+-- NOTIFICATION COOLDOWN (prevents spam)
+local lastPickupNotification = {}
+local PICKUP_COOLDOWN = 3
+
 local function StringToKeyCode(str)
     if not str or str == "" then return nil end
     str = string.upper(str)
@@ -185,7 +189,7 @@ getgenv().isHero = isHeroFast
 getgenv().isAlive = isAliveFast
 getgenv().isInnocent = isInnocentFast
 
--- ===== GUN PICKUP HERO DETECTION (FIXED - No false Sheriff notifications) =====
+-- ===== GUN PICKUP HERO DETECTION (FIXED - No spam, no false Sheriff) =====
 local function refreshESPForPlayer(plr)
     if not State.esp_enabled then return end
     if plr and plr.Character then
@@ -218,7 +222,6 @@ local function updateHeroRole(plr)
     
     local hasGun = playerHasGun(plr)
     
-    -- Only make someone Hero if they have a gun AND they are NOT the Sheriff
     if hasGun and not isSheriffFast(plr) then
         local currentRole = RoleCache[plr.Name] and RoleCache[plr.Name].Role
         if currentRole ~= "Hero" then
@@ -227,16 +230,14 @@ local function updateHeroRole(plr)
                 Dead = false,
                 Gun = true,
             }
-            Notifier.new({Title="Hero Detected", Content=plr.Name.." picked up a gun and is now HERO!", Duration=3})
+            Notifier.new({Title="Hero Detected", Content=plr.Name.." is now HERO!", Duration=3})
             
             task.spawn(function()
                 task.wait(0.1)
                 refreshESPForPlayer(plr)
                 if plr.Character then
                     local hl = plr.Character:FindFirstChild("MM2Highlight")
-                    if hl then
-                        hl.FillColor = getRoleColor(plr)
-                    end
+                    if hl then hl.FillColor = getRoleColor(plr) end
                     local tag = plr.Character:FindFirstChild("MM2NameTag")
                     if tag and tag:FindFirstChild("TextLabel") then
                         tag.TextLabel.TextColor3 = getRoleColor(plr)
@@ -262,9 +263,7 @@ local function updateHeroRole(plr)
                 refreshESPForPlayer(plr)
                 if plr.Character then
                     local hl = plr.Character:FindFirstChild("MM2Highlight")
-                    if hl then
-                        hl.FillColor = getRoleColor(plr)
-                    end
+                    if hl then hl.FillColor = getRoleColor(plr) end
                 end
                 if State.box_esp_enabled and boxEspCache[plr] then
                     boxEspCache[plr].box.Color = getRoleColor(plr)
@@ -307,9 +306,12 @@ local function monitorCharacter(plr)
     character.ChildAdded:Connect(function(tool)
         if tool and tool:IsA("Tool") and (tool.Name == "Gun" or tool.Name == "Revolver") then
             task.wait(0.1)
-            -- Only show pickup notification if they are NOT the Sheriff (Sheriff spawns with gun)
             if not isSheriffFast(plr) then
-                Notifier.new({Title="Gun Pickup", Content=plr.Name.." picked up the gun!", Duration=2})
+                local lastTime = lastPickupNotification[plr.Name] or 0
+                if tick() - lastTime > PICKUP_COOLDOWN then
+                    lastPickupNotification[plr.Name] = tick()
+                    Notifier.new({Title="Gun Pickup", Content=plr.Name.." picked up the gun!", Duration=2})
+                end
             end
             updateHeroRole(plr)
         end
@@ -323,7 +325,6 @@ local function monitorCharacter(plr)
     end)
 end
 
--- Monitors when GunDrop is removed (someone picked it up)
 local function monitorGunDrop()
     local function checkGunDropRemoved()
         local gunDrop = nil
@@ -342,9 +343,12 @@ local function monitorGunDrop()
                     if plr ~= LocalPlayer and isAliveFast(plr) and not isMurdererFast(plr) and not isSheriffFast(plr) then
                         if playerHasGun(plr) then
                             updateHeroRole(plr)
-                            -- Only show pickup notification if they are NOT the Sheriff
                             if not isSheriffFast(plr) then
-                                Notifier.new({Title="Gun Pickup", Content=plr.Name.." picked up the gun!", Duration=2})
+                                local lastTime = lastPickupNotification[plr.Name] or 0
+                                if tick() - lastTime > PICKUP_COOLDOWN then
+                                    lastPickupNotification[plr.Name] = tick()
+                                    Notifier.new({Title="Gun Pickup", Content=plr.Name.." picked up the gun!", Duration=2})
+                                end
                             end
                         end
                     end
