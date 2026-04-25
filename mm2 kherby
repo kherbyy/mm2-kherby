@@ -185,7 +185,7 @@ getgenv().isHero = isHeroFast
 getgenv().isAlive = isAliveFast
 getgenv().isInnocent = isInnocentFast
 
--- ===== GUN PICKUP HERO DETECTION (BACKPACK + CHARACTER) =====
+-- ===== GUN PICKUP HERO DETECTION (FIXED - No false Sheriff notifications) =====
 local function refreshESPForPlayer(plr)
     if not State.esp_enabled then return end
     if plr and plr.Character then
@@ -218,6 +218,7 @@ local function updateHeroRole(plr)
     
     local hasGun = playerHasGun(plr)
     
+    -- Only make someone Hero if they have a gun AND they are NOT the Sheriff
     if hasGun and not isSheriffFast(plr) then
         local currentRole = RoleCache[plr.Name] and RoleCache[plr.Name].Role
         if currentRole ~= "Hero" then
@@ -306,6 +307,10 @@ local function monitorCharacter(plr)
     character.ChildAdded:Connect(function(tool)
         if tool and tool:IsA("Tool") and (tool.Name == "Gun" or tool.Name == "Revolver") then
             task.wait(0.1)
+            -- Only show pickup notification if they are NOT the Sheriff (Sheriff spawns with gun)
+            if not isSheriffFast(plr) then
+                Notifier.new({Title="Gun Pickup", Content=plr.Name.." picked up the gun!", Duration=2})
+            end
             updateHeroRole(plr)
         end
     end)
@@ -317,6 +322,46 @@ local function monitorCharacter(plr)
         end
     end)
 end
+
+-- Monitors when GunDrop is removed (someone picked it up)
+local function monitorGunDrop()
+    local function checkGunDropRemoved()
+        local gunDrop = nil
+        for _, obj in ipairs(Workspace:GetDescendants()) do
+            if obj.Name == "GunDrop" then
+                gunDrop = obj
+                break
+            end
+        end
+        
+        if gunDrop then
+            local connection
+            connection = gunDrop.AncestryChanged:Connect(function()
+                task.wait(0.3)
+                for _, plr in ipairs(Players:GetPlayers()) do
+                    if plr ~= LocalPlayer and isAliveFast(plr) and not isMurdererFast(plr) and not isSheriffFast(plr) then
+                        if playerHasGun(plr) then
+                            updateHeroRole(plr)
+                            -- Only show pickup notification if they are NOT the Sheriff
+                            if not isSheriffFast(plr) then
+                                Notifier.new({Title="Gun Pickup", Content=plr.Name.." picked up the gun!", Duration=2})
+                            end
+                        end
+                    end
+                end
+                if connection then connection:Disconnect() end
+            end)
+        end
+    end
+    
+    task.spawn(function()
+        while task.wait(0.5) do
+            checkGunDropRemoved()
+        end
+    end)
+end
+
+monitorGunDrop()
 
 local function initialGunCheck(plr)
     if plr == LocalPlayer then return end
@@ -782,7 +827,7 @@ ToggleFPSBooster = function(enabled)
     end
 end
 
--- ===== ENHANCED PREDICTION SYSTEM (WORKS FOR FAST + NORMAL MOVEMENT) =====
+-- ===== ENHANCED PREDICTION SYSTEM =====
 PredictionSystem = {playerData = {}, gravity = workspace.Gravity}
 NetworkMetrics = {
     ping = 0, variance = 0, jitter = 0, standardDeviation = 0,
