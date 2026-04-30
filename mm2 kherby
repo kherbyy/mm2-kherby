@@ -52,6 +52,10 @@ Lighting = game:GetService("Lighting")
 LocalPlayer = Players.LocalPlayer
 mouse = LocalPlayer:GetMouse()
 
+-- NOTIFICATION COOLDOWN
+local lastPickupNotification = {}
+local PICKUP_COOLDOWN = 3
+
 local function StringToKeyCode(str)
     if not str or str == "" then return nil end
     str = string.upper(str)
@@ -59,7 +63,7 @@ local function StringToKeyCode(str)
     return Enum.KeyCode[str]
 end
 
--- ===== FAST ROLE DETECTION (SERVER DATA ONLY) =====
+-- ===== FAST ROLE DETECTION =====
 RoleCache = {}
 
 updateRoleCache = function(data)
@@ -105,14 +109,12 @@ if gameplayRemote then
     end
 end
 
--- ===== ROUND RESET - CLEAR ALL ROLES WHEN ROUND ENDS =====
 local function resetAllRoles()
     for name in pairs(RoleCache) do
         RoleCache[name] = nil
     end
 end
 
--- Listen for round end events
 if gameplayRemote then
     local roundEndEvent = gameplayRemote:FindFirstChild("RoundEndFade")
     if roundEndEvent then
@@ -136,7 +138,6 @@ task.spawn(function()
     fetchInitialRoles()
 end)
 
--- Role check functions (server data only)
 isMurdererFast = function(plr)
     if not plr then return false end
     local data = RoleCache[plr.Name]
@@ -155,6 +156,13 @@ isHeroFast = function(plr)
     if not plr then return false end
     local data = RoleCache[plr.Name]
     if data then return data.Role == "Hero" end
+    if plr ~= LocalPlayer and isAliveFast(plr) then
+        local hasGun = (plr.Backpack and (plr.Backpack:FindFirstChild("Gun") or plr.Backpack:FindFirstChild("Revolver"))) or
+                       (plr.Character and (plr.Character:FindFirstChild("Gun") or plr.Character:FindFirstChild("Revolver")))
+        if hasGun and not isMurdererFast(plr) and not isSheriffFast(plr) then
+            return true
+        end
+    end
     return false
 end
 
@@ -181,12 +189,37 @@ getgenv().isAlive = isAliveFast
 getgenv().isInnocent = isInnocentFast
 
 -- ===== GUN PICKUP HERO DETECTION =====
+local function refreshESPForPlayer(plr)
+    if not State.esp_enabled then return end
+    if plr and plr.Character then
+        CleanupESP(plr.Character)
+        CreateESP(plr.Character, plr)
+    end
+    if State.box_esp_enabled and boxEspCache[plr] then
+        boxEspCache[plr].box.Color = getRoleColor(plr)
+    end
+end
+
+local function playerHasGun(plr)
+    if not plr then return false end
+    if plr.Character then
+        if plr.Character:FindFirstChild("Gun") or plr.Character:FindFirstChild("Revolver") then
+            return true
+        end
+    end
+    if plr.Backpack then
+        if plr.Backpack:FindFirstChild("Gun") or plr.Backpack:FindFirstChild("Revolver") then
+            return true
+        end
+    end
+    return false
+end
+
 local function updateHeroRole(plr)
     if not plr or plr == LocalPlayer then return end
     if isMurdererFast(plr) then return end
     
-    local hasGun = (plr.Character and (plr.Character:FindFirstChild("Gun") or plr.Character:FindFirstChild("Revolver"))) or
-                   (plr.Backpack and (plr.Backpack:FindFirstChild("Gun") or plr.Backpack:FindFirstChild("Revolver")))
+    local hasGun = playerHasGun(plr)
     
     if hasGun and not isSheriffFast(plr) then
         local currentRole = RoleCache[plr.Name] and RoleCache[plr.Name].Role
@@ -196,49 +229,163 @@ local function updateHeroRole(plr)
                 Dead = false,
                 Gun = true,
             }
-            Notifier.new({Title="Hero Detected", Content=plr.Name.." picked up a gun and is now HERO!", Duration=3})
-            if State.esp_enabled then ForceRefreshESP() end
-            if State.box_esp_enabled and boxEspCache[plr] then
-                boxEspCache[plr].box.Color = getRoleColor(plr)
-            end
+            Notifier.new({Title="Hero Detected", Content=plr.Name.." is now HERO!", Duration=3})
+            
+            task.spawn(function()
+                task.wait(0.1)
+                refreshESPForPlayer(plr)
+                if plr.Character then
+                    local hl = plr.Character:FindFirstChild("MM2Highlight")
+                    if hl then hl.FillColor = getRoleColor(plr) end
+                    local tag = plr.Character:FindFirstChild("MM2NameTag")
+                    if tag and tag:FindFirstChild("TextLabel") then
+                        tag.TextLabel.TextColor3 = getRoleColor(plr)
+                    end
+                end
+                if State.box_esp_enabled and boxEspCache[plr] then
+                    boxEspCache[plr].box.Color = getRoleColor(plr)
+                end
+            end)
+        end
+    elseif not hasGun and not isMurdererFast(plr) and not isSheriffFast(plr) then
+        local currentRole = RoleCache[plr.Name] and RoleCache[plr.Name].Role
+        if currentRole == "Hero" then
+            RoleCache[plr.Name] = {
+                Role = "Innocent",
+                Dead = false,
+                Gun = false,
+            }
+            Notifier.new({Title="Role Update", Content=plr.Name.." dropped the gun, now INNOCENT", Duration=2})
+            
+            task.spawn(function()
+                task.wait(0.1)
+                refreshESPForPlayer(plr)
+                if plr.Character then
+                    local hl = plr.Character:FindFirstChild("MM2Highlight")
+                    if hl then hl.FillColor = getRoleColor(plr) end
+                end
+                if State.box_esp_enabled and boxEspCache[plr] then
+                    boxEspCache[plr].box.Color = getRoleColor(plr)
+                end
+            end)
         end
     end
+end
+
+local function monitorBackpack(plr)
+    if plr == LocalPlayer then return end
+    
+    local backpack = plr:FindFirstChild("Backpack")
+    if not backpack then
+        backpack = plr:WaitForChild("Backpack", 10)
+    end
+    if not backpack then return end
+    
+    backpack.ChildAdded:Connect(function(tool)
+        if tool and tool:IsA("Tool") and (tool.Name == "Gun" or tool.Name == "Revolver") then
+            task.wait(0.1)
+            updateHeroRole(plr)
+        end
+    end)
+    
+    backpack.ChildRemoved:Connect(function(tool)
+        if tool and tool:IsA("Tool") and (tool.Name == "Gun" or tool.Name == "Revolver") then
+            task.wait(0.1)
+            updateHeroRole(plr)
+        end
+    end)
+end
+
+local function monitorCharacter(plr)
+    if plr == LocalPlayer then return end
+    
+    local character = plr.Character
+    if not character then return end
+    
+    character.ChildAdded:Connect(function(tool)
+        if tool and tool:IsA("Tool") and (tool.Name == "Gun" or tool.Name == "Revolver") then
+            task.wait(0.1)
+            if not isSheriffFast(plr) then
+                local lastTime = lastPickupNotification[plr.Name] or 0
+                if tick() - lastTime > PICKUP_COOLDOWN then
+                    lastPickupNotification[plr.Name] = tick()
+                    Notifier.new({Title="Gun Pickup", Content=plr.Name.." picked up the gun!", Duration=2})
+                end
+            end
+            updateHeroRole(plr)
+        end
+    end)
+    
+    character.ChildRemoved:Connect(function(tool)
+        if tool and tool:IsA("Tool") and (tool.Name == "Gun" or tool.Name == "Revolver") then
+            task.wait(0.1)
+            updateHeroRole(plr)
+        end
+    end)
+end
+
+local function monitorGunDrop()
+    local function checkGunDropRemoved()
+        local gunDrop = nil
+        for _, obj in ipairs(Workspace:GetDescendants()) do
+            if obj.Name == "GunDrop" then
+                gunDrop = obj
+                break
+            end
+        end
+        
+        if gunDrop then
+            local connection
+            connection = gunDrop.AncestryChanged:Connect(function()
+                task.wait(0.3)
+                for _, plr in ipairs(Players:GetPlayers()) do
+                    if plr ~= LocalPlayer and isAliveFast(plr) and not isMurdererFast(plr) and not isSheriffFast(plr) then
+                        if playerHasGun(plr) then
+                            updateHeroRole(plr)
+                            if not isSheriffFast(plr) then
+                                local lastTime = lastPickupNotification[plr.Name] or 0
+                                if tick() - lastTime > PICKUP_COOLDOWN then
+                                    lastPickupNotification[plr.Name] = tick()
+                                    Notifier.new({Title="Gun Pickup", Content=plr.Name.." picked up the gun!", Duration=2})
+                                end
+                            end
+                        end
+                    end
+                end
+                if connection then connection:Disconnect() end
+            end)
+        end
+    end
+    
+    task.spawn(function()
+        while task.wait(0.5) do
+            checkGunDropRemoved()
+        end
+    end)
+end
+
+monitorGunDrop()
+
+local function initialGunCheck(plr)
+    if plr == LocalPlayer then return end
+    task.wait(0.5)
+    updateHeroRole(plr)
 end
 
 local function setupHeroMonitoring(plr)
     if plr == LocalPlayer then return end
     
-    local function checkGun()
-        task.wait(0.1)
-        updateHeroRole(plr)
-    end
+    task.spawn(function() initialGunCheck(plr) end)
+    task.spawn(function() monitorBackpack(plr) end)
     
     if plr.Character then
-        plr.Character.ChildAdded:Connect(function(tool)
-            if tool and tool:IsA("Tool") and (tool.Name == "Gun" or tool.Name == "Revolver") then
-                checkGun()
-            end
-        end)
+        task.spawn(function() monitorCharacter(plr) end)
     end
     
-    if plr.Backpack then
-        plr.Backpack.ChildAdded:Connect(function(tool)
-            if tool and tool:IsA("Tool") and (tool.Name == "Gun" or tool.Name == "Revolver") then
-                checkGun()
-            end
-        end)
-    end
-    
-    plr.CharacterAdded:Connect(function()
+    plr.CharacterAdded:Connect(function(char)
         task.wait(0.5)
-        if plr.Character then
-            plr.Character.ChildAdded:Connect(function(tool)
-                if tool and tool:IsA("Tool") and (tool.Name == "Gun" or tool.Name == "Revolver") then
-                    checkGun()
-                end
-            end)
-        end
-        checkGun()
+        task.spawn(function() monitorCharacter(plr) end)
+        task.spawn(function() updateHeroRole(plr) end)
     end)
 end
 
@@ -273,13 +420,15 @@ getgenv().MM2State = {
     speedboost_enabled = false, speedboost_amount = 19,
     infinite_jump = false, noclip_enabled = false, antifling_enabled = false,
     gun_esp = true, gun_highlight = true, gun_tracer = true, gun_autotp = false,
+    sheriff_tracer = false, murderer_tracer = false,
     godmode_enabled = false, godmode_keybind = "G",
     desync_enabled = false, desync_active = false, desync_keybind = "Z",
     autofarm_enabled = false, autofarm_esp = false, autofarm_mode = "DESYNC", autofarm_tween_speed = 0.8,
+    prediction_mode = "V1", -- V1 (Advanced) or V2 (Simple)
 }
 State = getgenv().MM2State
 
--- ===== TRADE SYSTEM (MULTI-TARGET) =====
+-- ===== TRADE SYSTEM =====
 Sync = nil
 pcall(function() Sync = require(ReplicatedStorage:WaitForChild("Database"):WaitForChild("Sync")) end)
 
@@ -682,12 +831,139 @@ ToggleFPSBooster = function(enabled)
     end
 end
 
--- ===== ENHANCED PREDICTION FOR SMALL AVATARS / HITBOX ABUSERS =====
-PredictionSystem = {playerData = {}, gravity = workspace.Gravity}
+-- ============================================
+--  PREDICTION V1 (ADVANCED - With smoothing, acceleration, distance-based)
+-- ============================================
+
+-- Per-player data storage for V1
+local V1PlayerData = {}
+
+local function getV1PlayerData(player)
+    if not V1PlayerData[player] then
+        V1PlayerData[player] = {
+            lastVelocity = Vector3.zero,
+            lastTime = tick(),
+        }
+    end
+    return V1PlayerData[player]
+end
+
+function predictV1(targetPart, myPosition)
+    if not targetPart then return targetPart and targetPart.Position or Vector3.new() end
+    
+    local player = nil
+    -- Find which player this targetPart belongs to
+    local character = targetPart.Parent
+    if character and character:IsA("Model") then
+        player = Players:GetPlayerFromCharacter(character)
+    end
+    
+    local data = getV1PlayerData(player)
+    local currentTime = tick()
+    local dt = math.min(0.1, currentTime - data.lastTime)
+    data.lastTime = currentTime
+
+    local position = targetPart.Position
+    local currentVelocity = targetPart.AssemblyLinearVelocity or Vector3.zero
+
+    -- 1. Smooth velocity (anti-zigzag)
+    local SMOOTHING = 0.2
+    data.lastVelocity = data.lastVelocity:Lerp(currentVelocity, SMOOTHING)
+
+    -- 2. Calculate acceleration
+    local acceleration = Vector3.zero
+    if dt > 0 then
+        acceleration = (currentVelocity - data.lastVelocity) / dt
+    end
+
+    -- 3. Distance-based prediction timing
+    local distance = myPosition and (myPosition - position).Magnitude or 50
+    local predictionTime
+    
+    if distance < 10 then
+        predictionTime = 0.03 -- close range
+    elseif distance < 25 then
+        predictionTime = 0.05 -- mid range
+    else
+        predictionTime = 0.07 -- far range
+    end
+
+    -- 4. Split movement into horizontal and vertical
+    local horizontalVelocity = Vector3.new(data.lastVelocity.X, 0, data.lastVelocity.Z)
+    local verticalVelocity = data.lastVelocity.Y
+
+    -- 5. Jump handling (reduce vertical effect so we don't overshoot)
+    local verticalAdjustment = 0
+    if math.abs(verticalVelocity) > 2 then
+        verticalAdjustment = verticalVelocity * (predictionTime * 0.3)
+    end
+
+    -- 6. Acceleration influence (clamped to prevent overshoot)
+    local accelFactor = 0.5
+    local accelContribution = acceleration * (predictionTime ^ 2) * accelFactor
+    
+    -- Clamp acceleration contribution
+    if accelContribution.Magnitude > 10 then
+        accelContribution = accelContribution.Unit * 10
+    end
+
+    -- 7. Final predicted position
+    local predictedPosition = position 
+        + (horizontalVelocity * predictionTime) 
+        + Vector3.new(0, verticalAdjustment, 0) 
+        + accelContribution
+
+    -- Keep Y axis at torso level (don't predict too high/low)
+    predictedPosition = Vector3.new(
+        predictedPosition.X,
+        math.clamp(predictedPosition.Y, position.Y - 3, position.Y + 4),
+        predictedPosition.Z
+    )
+
+    return predictedPosition
+end
+
+-- Clean up V1 data periodically
+task.spawn(function()
+    while task.wait(60) do
+        for player, _ in pairs(V1PlayerData) do
+            if not player or not player.Parent then
+                V1PlayerData[player] = nil
+            end
+        end
+    end
+end)
+
+-- ============================================
+--  PREDICTION V2 (SIMPLE - Just position + velocity)
+-- ============================================
+function predictV2(targetPart, myPosition)
+    if not targetPart then return targetPart and targetPart.Position or Vector3.new() end
+    
+    local position = targetPart.Position
+    local velocity = targetPart.AssemblyLinearVelocity or Vector3.new()
+    
+    -- Simple prediction with fixed time
+    local predictionTime = 0.05
+    
+    local predictedPos = position + (velocity * predictionTime)
+    
+    -- Keep Y axis reasonable (don't predict too high)
+    predictedPos = Vector3.new(
+        predictedPos.X,
+        math.clamp(predictedPos.Y, position.Y - 3, position.Y + 4),
+        predictedPos.Z
+    )
+    
+    return predictedPos
+end
+
+-- ===== NETWORK METRICS (for ping display only) =====
 NetworkMetrics = {
-    ping = 0, variance = 0, jitter = 0, standardDeviation = 0,
-    lastUpdate = 0, history = {}, maxHistory = 200,
-    RTTBuffer = 0, packetLoss = 0, stability = 1.0,
+    ping = 0,
+    lastUpdate = 0,
+    history = {},
+    maxHistory = 200,
 }
 
 getNetworkPing = function()
@@ -700,311 +976,37 @@ getNetworkPing = function()
     return math.clamp(ping, 2, 500)
 end
 
-calculateStandardDeviation = function(data)
-    if #data < 2 then return 0 end
-    local sum = 0 for _, v in ipairs(data) do sum = sum + v end
-    local mean = sum / #data
-    local varianceSum = 0 for _, v in ipairs(data) do varianceSum = varianceSum + (v - mean) ^ 2 end
-    return math.sqrt(varianceSum / #data)
-end
-
 updateNetworkMetrics = function()
     local currentTime = tick()
     if currentTime - NetworkMetrics.lastUpdate < 0.1 then return end
     local rawPing = getNetworkPing()
     table.insert(NetworkMetrics.history, 1, rawPing)
     if #NetworkMetrics.history > NetworkMetrics.maxHistory then table.remove(NetworkMetrics.history) end
-    if #NetworkMetrics.history >= 30 then
-        local recentPings = {}
-        for i = 1, math.min(50, #NetworkMetrics.history) do table.insert(recentPings, NetworkMetrics.history[i]) end
-        local sum = 0 for _, p in ipairs(recentPings) do sum = sum + p end
-        local avgPing = sum / #recentPings
-        NetworkMetrics.standardDeviation = calculateStandardDeviation(recentPings)
-        NetworkMetrics.variance = NetworkMetrics.standardDeviation ^ 2
-        NetworkMetrics.jitter = NetworkMetrics.standardDeviation * 0.6
-        NetworkMetrics.ping = avgPing
-        local stableCount = 0
-        for _, p in ipairs(recentPings) do if math.abs(p - avgPing) < NetworkMetrics.standardDeviation * 1.5 then stableCount = stableCount + 1 end end
-        NetworkMetrics.stability = stableCount / #recentPings
-        NetworkMetrics.RTTBuffer = (NetworkMetrics.ping + NetworkMetrics.jitter * 1.2) / 1000
+    if #NetworkMetrics.history >= 10 then
+        local sum = 0
+        for i = 1, math.min(20, #NetworkMetrics.history) do
+            sum = sum + NetworkMetrics.history[i]
+        end
+        NetworkMetrics.ping = sum / math.min(20, #NetworkMetrics.history)
     else
         NetworkMetrics.ping = rawPing
-        NetworkMetrics.RTTBuffer = rawPing / 1000
-        NetworkMetrics.stability = 0.5
     end
     NetworkMetrics.lastUpdate = currentTime
 end
 
-initPlayerData = function(player)
-    if not PredictionSystem.playerData[player] then
-        PredictionSystem.playerData[player] = {
-            lastPosition = Vector3.new(), lastVelocity = Vector3.new(), lastTime = tick(),
-            positionHistory = {}, velocityHistory = {}, directionHistory = {},
-            lastTargetPart = "UpperTorso", wasJumping = false, strafeDirection = 0, lastStrafeTime = 0,
-            acceleration = Vector3.new(), lastVelMagnitude = 0, isFlying = false, flyingTime = 0,
-            maxVelocity = 0, speedHackDetected = false,
-        }
-    end
-    return PredictionSystem.playerData[player]
-end
-
-isPlayerJumping = function(character)
-    if not character then return false end
-    local humanoid = character:FindFirstChildOfClass("Humanoid")
-    if not humanoid then return false end
-    local rootPart = character:FindFirstChild("HumanoidRootPart")
-    if rootPart then
-        local velocityY = rootPart.AssemblyLinearVelocity and rootPart.AssemblyLinearVelocity.Y or 0
-        return velocityY > 5 and humanoid.FloorMaterial == Enum.Material.Air
-    end
-    return false
-end
-
-detectFlyingOrSpeedhack = function(data, currentVel, gravity)
-    local velMagnitude = currentVel.Magnitude
-    local velDelta = velMagnitude - data.lastVelMagnitude
-    if velMagnitude > data.maxVelocity then data.maxVelocity = velMagnitude end
-    local normalMaxAccel = gravity * 5
-    local detectedAccel = math.abs(velDelta)
-    if detectedAccel > normalMaxAccel * 2 and velMagnitude > 50 then
-        data.speedHackDetected = true
-    else
-        data.speedHackDetected = false
-    end
-    local velocityY = currentVel.Y
-    if velocityY > 10 and not isPlayerJumping then
-        data.flyingTime = data.flyingTime + 0.016
-        if data.flyingTime > 0.2 then data.isFlying = true end
-    else
-        data.flyingTime = 0
-        data.isFlying = false
-    end
-    if #data.velocityHistory > 0 then
-        local timeDelta = 0.016
-        data.acceleration = (currentVel - data.lastVelocity) / timeDelta
-    end
-end
-
-detectStrafeDirection = function(player, currentVel)
-    local data = initPlayerData(player)
-    if #data.velocityHistory < 3 then return 0 end
-    local prevVel = data.velocityHistory[#data.velocityHistory - 1]
-    if not prevVel then return 0 end
-    local currentHoriz = Vector3.new(currentVel.X, 0, currentVel.Z)
-    local prevHoriz = Vector3.new(prevVel.vel.X, 0, prevVel.vel.Z)
-    if currentHoriz.Magnitude < 5 or prevHoriz.Magnitude < 5 then return 0 end
-    local currentDir = currentHoriz.Unit
-    local prevDir = prevHoriz.Unit
-    local crossY = prevDir.X * currentDir.Z - prevDir.Z * currentDir.X
-    local strafeDirection = crossY > 0.1 and 1 or (crossY < -0.1 and -1 or 0)
-    if strafeDirection ~= 0 and strafeDirection ~= data.strafeDirection then data.lastStrafeTime = tick() end
-    data.strafeDirection = strafeDirection
-    return strafeDirection
-end
-
--- Avatar scaling detection for hitbox abusers
-local function getAvatarScale(character)
-    if not character then return 1 end
-    local humanoid = character:FindFirstChildOfClass("Humanoid")
-    if humanoid and humanoid.RigType == Enum.HumanoidRigType.R15 then
-        local hrp = character:FindFirstChild("HumanoidRootPart")
-        if hrp then
-            local scale = hrp.Size.Y / 2
-            if scale > 0.5 and scale < 1.5 then
-                return math.clamp(scale, 0.6, 1.2)
-            end
-        end
-    end
-    return 1
-end
-
--- Get best hitbox part for small avatars
-local function getBestHitboxPart(character, isAirborne)
-    if not character then return nil end
-    
-    local hrp = character:FindFirstChild("HumanoidRootPart")
-    local head = character:FindFirstChild("Head")
-    local upperTorso = character:FindFirstChild("UpperTorso")
-    local lowerTorso = character:FindFirstChild("LowerTorso") or character:FindFirstChild("HumanoidRootPart")
-    
-    local avatarScale = getAvatarScale(character)
-    
-    if avatarScale < 0.8 then
-        return upperTorso or lowerTorso or hrp or head
-    end
-    
-    if isAirborne then
-        return upperTorso or lowerTorso or hrp or head
-    else
-        return upperTorso or lowerTorso or head or hrp
-    end
-end
-
--- MAIN PREDICTION FUNCTION - ENHANCED FOR HITBOX ABUSERS
+-- ===== MAIN PREDICTION FUNCTION =====
 predictPlayerPosition = function(player, targetPart)
-    if not player or not player.Character then return targetPart and targetPart.Position or Vector3.new() end
-    local character = player.Character
-    local hrp = character:FindFirstChild("HumanoidRootPart")
-    if not hrp then return targetPart and targetPart.Position or Vector3.new() end
+    if not targetPart then return targetPart and targetPart.Position or Vector3.new() end
     
-    updateNetworkMetrics()
-    local data = initPlayerData(player)
-    local currentTime = tick()
-    local currentPos = hrp.Position
-    local currentVel = hrp.Velocity
-    local gravity = PredictionSystem.gravity
+    -- Get my position for distance calculation
+    local myChar = LocalPlayer.Character
+    local myPosition = myChar and myChar:FindFirstChild("HumanoidRootPart") and myChar.HumanoidRootPart.Position or Vector3.new()
     
-    detectFlyingOrSpeedhack(data, currentVel, gravity)
-    
-    table.insert(data.positionHistory, 1, {pos = currentPos, time = currentTime})
-    if #data.positionHistory > 20 then table.remove(data.positionHistory) end
-    table.insert(data.velocityHistory, 1, {vel = currentVel, time = currentTime})
-    if #data.velocityHistory > 20 then table.remove(data.velocityHistory) end
-    
-    if currentVel.Magnitude > 1 then
-        local currentDir = currentVel.Unit
-        table.insert(data.directionHistory, 1, currentDir)
-        if #data.directionHistory > 15 then table.remove(data.directionHistory) end
-    end
-    
-    data.lastPosition = currentPos
-    data.lastVelocity = currentVel
-    data.lastTime = currentTime
-    data.lastVelMagnitude = currentVel.Magnitude
-    
-    local isJumping = isPlayerJumping(character)
-    local avatarScale = getAvatarScale(character)
-    
-    local chosenPart = targetPart or getBestHitboxPart(character, isJumping)
-    if not chosenPart then chosenPart = hrp end
-    
-    local targetPos = chosenPart.Position
-    local velocity = chosenPart.AssemblyLinearVelocity or Vector3.new()
-    
-    local basePrediction = math.clamp(NetworkMetrics.RTTBuffer + 0.035, 0.03, 0.12)
-    local speedBonus = 0
-    
-    if data.isFlying then
-        speedBonus = math.min(velocity.Magnitude / 2000, 0.08)
-        basePrediction = basePrediction + 0.03
-    elseif data.speedHackDetected then
-        speedBonus = math.min(velocity.Magnitude / 1500, 0.1)
-        basePrediction = basePrediction + 0.04
+    if State.prediction_mode == "V2" then
+        return predictV2(targetPart, myPosition)
     else
-        speedBonus = math.min(velocity.Magnitude / 2500, 0.06)
+        return predictV1(targetPart, myPosition)
     end
-    
-    if avatarScale < 0.8 then
-        local hitboxCompensation = (0.8 - avatarScale) * 0.1
-        basePrediction = basePrediction + math.min(hitboxCompensation, 0.05)
-    end
-    
-    local predictionTime = math.clamp(basePrediction + speedBonus, 0.035, 0.18)
-    local predictedPos = targetPos + (velocity * predictionTime)
-    
-    if isJumping or math.abs(velocity.Y) > 5 then
-        local verticalVelocity = velocity.Y
-        local verticalOffset = (verticalVelocity * predictionTime) - (0.5 * gravity * predictionTime * predictionTime)
-        
-        if avatarScale < 0.8 then
-            if verticalVelocity < -3 then
-                verticalOffset = verticalOffset - (gravity * predictionTime * predictionTime * 0.4)
-            elseif verticalVelocity > 3 then
-                verticalOffset = verticalOffset + (verticalVelocity * predictionTime * 0.3)
-            end
-            verticalOffset = verticalOffset + (avatarScale * 0.5)
-        else
-            if verticalVelocity < -3 then
-                verticalOffset = verticalOffset - (gravity * predictionTime * predictionTime * 0.3)
-            elseif verticalVelocity > 3 then
-                verticalOffset = verticalOffset + (verticalVelocity * predictionTime * 0.2)
-            end
-        end
-        
-        predictedPos = Vector3.new(predictedPos.X, targetPos.Y + verticalOffset, predictedPos.Z)
-        
-        if velocity.Magnitude > 8 then
-            local horizontalVel = Vector3.new(velocity.X, 0, velocity.Z)
-            local horizontalMult = avatarScale < 0.8 and 1.3 or 1.1
-            local horizontalPrediction = horizontalVel * predictionTime * horizontalMult
-            predictedPos = Vector3.new(predictedPos.X + horizontalPrediction.X, predictedPos.Y, predictedPos.Z + horizontalPrediction.Z)
-        end
-    end
-    
-    local strafeDirection = detectStrafeDirection(player, velocity)
-    local isStrafing = math.abs(strafeDirection) > 0
-    local strafeMult = avatarScale < 0.8 and 1.5 or 1.0
-    
-    if isStrafing and velocity.Magnitude > 12 and not isJumping then
-        local strafeStrength = math.min(velocity.Magnitude / 50, 2) * strafeMult
-        if strafeDirection > 0 then
-            predictedPos = predictedPos + (chosenPart.CFrame.RightVector * strafeStrength * 0.4)
-        elseif strafeDirection < 0 then
-            predictedPos = predictedPos - (chosenPart.CFrame.RightVector * strafeStrength * 0.4)
-        end
-    end
-    
-    if #data.directionHistory >= 5 then
-        local directionChanges = 0
-        for i = 2, math.min(5, #data.directionHistory) do 
-            if data.directionHistory[i-1]:Dot(data.directionHistory[i]) < 0.5 then 
-                directionChanges = directionChanges + 1 
-            end 
-        end
-        if directionChanges >= 2 then
-            local zigzagFactor = math.sin(tick() * 20) * 0.3
-            if avatarScale < 0.8 then
-                zigzagFactor = zigzagFactor * 1.3
-            end
-            predictedPos = predictedPos + (chosenPart.CFrame.RightVector * zigzagFactor * 0.4)
-        end
-    end
-    
-    if #data.velocityHistory >= 2 then
-        local avgVelX = 0
-        local avgVelZ = 0
-        local weightSum = 0
-        for i = 1, math.min(3, #data.velocityHistory) do
-            local weight = 1 / i
-            avgVelX = avgVelX + data.velocityHistory[i].vel.X * weight
-            avgVelZ = avgVelZ + data.velocityHistory[i].vel.Z * weight
-            weightSum = weightSum + weight
-        end
-        if weightSum > 0 then
-            avgVelX = avgVelX / weightSum
-            avgVelZ = avgVelZ / weightSum
-            local smoothedVel = Vector3.new(avgVelX, velocity.Y * 0.5, avgVelZ)
-            local smoothWeight = avatarScale < 0.8 and 0.75 or 0.8
-            local smoothedPos = targetPos + (smoothedVel * predictionTime * 0.5)
-            predictedPos = predictedPos * smoothWeight + smoothedPos * (1 - smoothWeight)
-        end
-    end
-    
-    if avatarScale < 0.85 then
-        local spreadAmount = (0.85 - avatarScale) * 0.8
-        if spreadAmount > 0 then
-            local angle = tick() * 10
-            local xOffset = math.sin(angle) * spreadAmount
-            local zOffset = math.cos(angle * 0.7) * spreadAmount
-            predictedPos = Vector3.new(predictedPos.X + xOffset, predictedPos.Y, predictedPos.Z + zOffset)
-        end
-    end
-    
-    local lowestPoint = targetPos.Y - 4
-    if avatarScale < 0.8 then
-        lowestPoint = targetPos.Y - (4 * avatarScale)
-    end
-    if predictedPos.Y < lowestPoint then
-        predictedPos = Vector3.new(predictedPos.X, lowestPoint, predictedPos.Z)
-    end
-    
-    predictedPos = Vector3.new(
-        predictedPos.X,
-        math.clamp(predictedPos.Y, -50, 500),
-        predictedPos.Z
-    )
-    
-    return predictedPos
 end
 
 -- ===== UTILITY FUNCTIONS =====
@@ -1283,7 +1285,6 @@ SetupPlayerESP = function(plr)
     plr.CharacterAdded:Connect(function(char)
         task.wait(0.85)
         if State.esp_enabled and char and char.Parent then CreateESP(char, plr) end
-        PredictionSystem.playerData[plr] = nil
         task.spawn(function() monitorCharacterTools(plr) end)
     end)
     plr.CharacterRemoving:Connect(CleanupESP)
@@ -1406,9 +1407,10 @@ RunService:BindToRenderStep("BoxESP", Enum.RenderPriority.Camera.Value, function
     end
 end)
 
--- ===== GUN ESP =====
-CurrentGunTracer = nil
-BoxHandles = {}
+-- ===== 2D GUN ESP & TRACERS =====
+local gunTracer = nil
+local sheriffTracer = nil
+local murdererTracer = nil
 
 findGunDrop = function()
     for _, obj in ipairs(Workspace:GetDescendants()) do
@@ -1417,6 +1419,116 @@ findGunDrop = function()
         end
     end
     return nil
+end
+
+findSheriff = function()
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer and isAlive(plr) and isSheriff(plr) then
+            return plr
+        end
+    end
+    return nil
+end
+
+findMurderer = function()
+    for _, plr in ipairs(Players:GetPlayers()) do
+        if plr ~= LocalPlayer and isAlive(plr) and isMurderer(plr) then
+            return plr
+        end
+    end
+    return nil
+end
+
+local function create2DTracer(color)
+    local tracerLine = Drawing.new("Line")
+    tracerLine.Thickness = 2
+    tracerLine.Color = color
+    tracerLine.Visible = true
+    tracerLine.Transparency = 0.5
+    tracerLine.ZIndex = 10
+    return tracerLine
+end
+
+local function update2DTracer(tracer, targetPosition)
+    if not tracer then return end
+    local camera = workspace.CurrentCamera
+    local viewportSize = camera.ViewportSize
+    local fromPoint = Vector2.new(viewportSize.X / 2, viewportSize.Y)
+    local toPoint, onScreen = camera:WorldToViewportPoint(targetPosition)
+    if onScreen then
+        tracer.From = fromPoint
+        tracer.To = Vector2.new(toPoint.X, toPoint.Y)
+        tracer.Visible = true
+    else
+        tracer.Visible = false
+    end
+end
+
+local function updateAll2DTracers()
+    if State.gun_tracer then
+        local gunDrop = findGunDrop()
+        if gunDrop and gunDrop:IsA("BasePart") then
+            if not gunTracer then
+                gunTracer = create2DTracer(Color3.fromRGB(128, 0, 255))
+            end
+            update2DTracer(gunTracer, gunDrop.Position)
+        elseif gunTracer then
+            gunTracer.Visible = false
+        end
+    elseif gunTracer then
+        gunTracer.Visible = false
+    end
+    
+    if State.sheriff_tracer then
+        local sheriff = findSheriff()
+        if sheriff and sheriff.Character then
+            local targetPart = sheriff.Character:FindFirstChild("HumanoidRootPart") or sheriff.Character:FindFirstChild("Head")
+            if targetPart then
+                if not sheriffTracer then
+                    sheriffTracer = create2DTracer(Color3.fromRGB(0, 100, 255))
+                end
+                update2DTracer(sheriffTracer, targetPart.Position)
+            end
+        elseif sheriffTracer then
+            sheriffTracer.Visible = false
+        end
+    elseif sheriffTracer then
+        sheriffTracer.Visible = false
+    end
+    
+    if State.murderer_tracer then
+        local murderer = findMurderer()
+        if murderer and murderer.Character then
+            local targetPart = murderer.Character:FindFirstChild("HumanoidRootPart") or murderer.Character:FindFirstChild("Head")
+            if targetPart then
+                if not murdererTracer then
+                    murdererTracer = create2DTracer(Color3.fromRGB(255, 0, 0))
+                end
+                update2DTracer(murdererTracer, targetPart.Position)
+            end
+        elseif murdererTracer then
+            murdererTracer.Visible = false
+        end
+    elseif murdererTracer then
+        murdererTracer.Visible = false
+    end
+end
+
+RunService:BindToRenderStep("2DTracers", Enum.RenderPriority.Camera.Value + 2, updateAll2DTracers)
+
+local function cleanupTracers()
+    if gunTracer then gunTracer:Remove() gunTracer = nil end
+    if sheriffTracer then sheriffTracer:Remove() sheriffTracer = nil end
+    if murdererTracer then murdererTracer:Remove() murdererTracer = nil end
+end
+
+if gameplayRemote then
+    local roundEndEvent = gameplayRemote:FindFirstChild("RoundEndFade")
+    if roundEndEvent then
+        roundEndEvent.OnClientEvent:Connect(function()
+            cleanupTracers()
+        end)
+    end
 end
 
 createToolGunESP = function(gun)
@@ -1500,50 +1612,6 @@ highlightDroppedGun = function()
         txt.TextScaled = true
         txt.Font = Enum.Font.GothamBold
         txt.Parent = bill
-    end
-end
-
-updateGunTracer = function()
-    if not State.gun_tracer then
-        if CurrentGunTracer then CurrentGunTracer:Destroy() CurrentGunTracer = nil end
-        return
-    end
-    local character = LocalPlayer.Character
-    if not character or not character:FindFirstChild("HumanoidRootPart") then
-        if CurrentGunTracer then CurrentGunTracer:Destroy() CurrentGunTracer = nil end
-        return
-    end
-    local gunDrop = findGunDrop()
-    if gunDrop and gunDrop:IsA("BasePart") then
-        if CurrentGunTracer and CurrentGunTracer.Parent then
-            if CurrentGunTracer.Attachment1.Parent ~= gunDrop then
-                CurrentGunTracer.Attachment1.Parent = gunDrop
-            end
-        else
-            if CurrentGunTracer then CurrentGunTracer:Destroy() end
-            local att0 = Instance.new("Attachment")
-            att0.Name = "TracerAtt0"
-            att0.Parent = character.HumanoidRootPart
-            local att1 = Instance.new("Attachment")
-            att1.Name = "TracerAtt1"
-            att1.Parent = gunDrop
-            local beam = Instance.new("Beam")
-            beam.Name = "GunDropTracer"
-            beam.Attachment0 = att0
-            beam.Attachment1 = att1
-            beam.Color = ColorSequence.new(Color3.fromRGB(128, 0, 255))
-            beam.LightEmission = 0.8
-            beam.Transparency = NumberSequence.new(0.3)
-            beam.Width0 = 0.25
-            beam.Width1 = 0.25
-            beam.Texture = "rbxassetid://707177051"
-            beam.TextureSpeed = 2
-            beam.Parent = character.HumanoidRootPart
-            CurrentGunTracer = beam
-        end
-    elseif CurrentGunTracer then
-        CurrentGunTracer:Destroy()
-        CurrentGunTracer = nil
     end
 end
 
@@ -1758,6 +1826,7 @@ end
 HoldingMouse2 = false
 LockedTarget = nil
 LastLockedTarget = nil
+BoxHandles = {}
 
 getPlayerNames = function()
     local names = {}
@@ -1775,9 +1844,10 @@ getBestTarget = function()
     for _, plr in ipairs(Players:GetPlayers()) do
         if plr ~= LocalPlayer and isAlive(plr) and plr.Character then
             if State.aimbot_murderer_only and not isMurderer(plr) then continue end
-            local isJumping = isPlayerJumping(plr.Character)
-            local targetPart = isJumping and plr.Character:FindFirstChild("HumanoidRootPart") or (plr.Character:FindFirstChild("UpperTorso") or plr.Character:FindFirstChild("Torso"))
-            if not targetPart then targetPart = plr.Character:FindFirstChild("Head") end
+            
+            -- Target torso for sure hits
+            local targetPart = plr.Character:FindFirstChild("UpperTorso") or plr.Character:FindFirstChild("Torso")
+            if not targetPart then targetPart = plr.Character:FindFirstChild("HumanoidRootPart") end
             if targetPart then
                 local screenPos, onScreen = camera:WorldToViewportPoint(targetPart.Position)
                 if onScreen then
@@ -1800,12 +1870,21 @@ updateAimbot = function()
     local targetPlr = getBestTarget()
     if not targetPlr or not targetPlr.Character then return end
     
-    local isJumping = isPlayerJumping(targetPlr.Character)
-    local targetPart = isJumping and targetPlr.Character:FindFirstChild("HumanoidRootPart") or (targetPlr.Character:FindFirstChild("UpperTorso") or targetPlr.Character:FindFirstChild("Torso"))
+    -- Target torso for sure hits
+    local targetPart = targetPlr.Character:FindFirstChild("UpperTorso") or targetPlr.Character:FindFirstChild("Torso")
     if not targetPart then targetPart = targetPlr.Character:FindFirstChild("HumanoidRootPart") end
     if not targetPart then return end
     
-    local predictedPos = predictPlayerPosition(targetPlr, targetPart)
+    -- Get my position for distance calculation
+    local myChar = LocalPlayer.Character
+    local myPosition = myChar and myChar:FindFirstChild("HumanoidRootPart") and myChar.HumanoidRootPart.Position or Vector3.new()
+    
+    local predictedPos
+    if State.prediction_mode == "V2" then
+        predictedPos = predictV2(targetPart, myPosition)
+    else
+        predictedPos = predictV1(targetPart, myPosition)
+    end
     
     local camera = Workspace.CurrentCamera
     local currentCFrame = camera.CFrame
@@ -1842,12 +1921,22 @@ performFlickShoot = function()
         Notifier.new({Title="Flick Shoot", Content="No gun equipped", Duration=2})
         return
     end
-    local isJumping = isPlayerJumping(targetPlr.Character)
-    local targetPart = isJumping and targetPlr.Character:FindFirstChild("HumanoidRootPart") or (targetPlr.Character:FindFirstChild("UpperTorso") or targetPlr.Character:FindFirstChild("Torso"))
+    
+    -- Target torso
+    local targetPart = targetPlr.Character:FindFirstChild("UpperTorso") or targetPlr.Character:FindFirstChild("Torso")
     if not targetPart then targetPart = targetPlr.Character:FindFirstChild("HumanoidRootPart") end
     if not targetPart then return end
     
-    local targetPos = predictPlayerPosition(targetPlr, targetPart)
+    -- Get my position for distance calculation
+    local myChar = LocalPlayer.Character
+    local myPosition = myChar and myChar:FindFirstChild("HumanoidRootPart") and myChar.HumanoidRootPart.Position or Vector3.new()
+    
+    local targetPos
+    if State.prediction_mode == "V2" then
+        targetPos = predictV2(targetPart, myPosition)
+    else
+        targetPos = predictV1(targetPart, myPosition)
+    end
     
     local camera = Workspace.CurrentCamera
     local startCFrame = camera.CFrame
@@ -1884,12 +1973,20 @@ getMurdererTargetPosition = function()
     end
     if not targetMurderer or not targetMurderer.Character then return nil end
     
-    local isJumping = isPlayerJumping(targetMurderer.Character)
-    local targetPart = isJumping and targetMurderer.Character:FindFirstChild("HumanoidRootPart") or (targetMurderer.Character:FindFirstChild("UpperTorso") or targetMurderer.Character:FindFirstChild("Torso"))
-    if not targetPart then targetPart = targetMurderer.Character:FindFirstChild("Head") end
+    -- Target torso
+    local targetPart = targetMurderer.Character:FindFirstChild("UpperTorso") or targetMurderer.Character:FindFirstChild("Torso")
+    if not targetPart then targetPart = targetMurderer.Character:FindFirstChild("HumanoidRootPart") end
     if not targetPart then return nil end
     
-    return predictPlayerPosition(targetMurderer, targetPart)
+    -- Get my position for distance calculation
+    local myChar = LocalPlayer.Character
+    local myPosition = myChar and myChar:FindFirstChild("HumanoidRootPart") and myChar.HumanoidRootPart.Position or Vector3.new()
+    
+    if State.prediction_mode == "V2" then
+        return predictV2(targetPart, myPosition)
+    else
+        return predictV1(targetPart, myPosition)
+    end
 end
 
 setupSilentAim = function()
@@ -1949,9 +2046,20 @@ performSilentHacker = function()
     if not murderer then return end
     State.silent_hacker_target = murderer
     
-    local isJumping = isPlayerJumping(murderer.Character)
-    local targetPart = isJumping and murderer.Character:FindFirstChild("HumanoidRootPart") or (murderer.Character:FindFirstChild("UpperTorso") or murderer.Character:FindFirstChild("Torso"))
-    local predictedPos = predictPlayerPosition(murderer, targetPart)
+    -- Target torso
+    local targetPart = murderer.Character:FindFirstChild("UpperTorso") or murderer.Character:FindFirstChild("Torso")
+    if not targetPart then targetPart = murderer.Character:FindFirstChild("HumanoidRootPart") end
+    
+    -- Get my position for distance calculation
+    local myChar = LocalPlayer.Character
+    local myPosition = myChar and myChar:FindFirstChild("HumanoidRootPart") and myChar.HumanoidRootPart.Position or Vector3.new()
+    
+    local predictedPos
+    if State.prediction_mode == "V2" then
+        predictedPos = predictV2(targetPart, myPosition)
+    else
+        predictedPos = predictV1(targetPart, myPosition)
+    end
     if not predictedPos then return end
     
     State.silent_hacker_active = true
@@ -1969,9 +2077,13 @@ performSilentHacker = function()
             if not murderer or not isAlive(murderer) then stopSilentHacker() return end
             State.silent_hacker_target = murderer
             
-            local newIsJumping = isPlayerJumping(murderer.Character)
-            local newTargetPart = newIsJumping and murderer.Character:FindFirstChild("HumanoidRootPart") or (murderer.Character:FindFirstChild("UpperTorso") or murderer.Character:FindFirstChild("Torso"))
-            local newPredictedPos = predictPlayerPosition(murderer, newTargetPart)
+            local newTargetPart = murderer.Character:FindFirstChild("UpperTorso") or murderer.Character:FindFirstChild("Torso")
+            local newPredictedPos
+            if State.prediction_mode == "V2" then
+                newPredictedPos = predictV2(newTargetPart, myPosition)
+            else
+                newPredictedPos = predictV1(newTargetPart, myPosition)
+            end
             if not newPredictedPos then task.wait(0.016) continue end
             predictedPos = newPredictedPos
             
@@ -2631,7 +2743,6 @@ task.spawn(function()
         if State.hitbox_enabled then UpdateAllHitboxes() end
         refreshToolGunESP()
         highlightDroppedGun()
-        updateGunTracer()
     end
 end)
 
@@ -2649,19 +2760,11 @@ Workspace.DescendantAdded:Connect(function(d)
         task.wait(0.1)
         if State.gun_highlight then highlightDroppedGun() end
         Notifier.new({Title="Gun Dropped", Content="The gun has been dropped", Duration=4.5})
-        updateGunTracer()
         if State.gun_autotp and not isMurderer(LocalPlayer) then
             TeleportToGunSnapBack()
         elseif State.gun_autotp and isMurderer(LocalPlayer) then
             Notifier.new({Title="Auto TP Skipped", Content="You're the murderer - keeping your knife!", Duration=2})
         end
-    end
-end)
-
-Workspace.DescendantRemoving:Connect(function(d)
-    if d and d.Name == "GunDrop" and CurrentGunTracer then
-        CurrentGunTracer:Destroy()
-        CurrentGunTracer = nil
     end
 end)
 
@@ -2671,7 +2774,6 @@ LocalPlayer.CharacterAdded:Connect(function()
     if State.antifling_enabled then setupAntiFling() end
     if State.noclip_enabled then setupNoclip() end
     if State.infinite_jump then setupInfiniteJump() end
-    PredictionSystem.playerData = {}
     applyWalkSpeed()
     if State.headless_enabled then applyHeadless() end
     if State.korblox_enabled then applyKorblox() else backupLegData() end
@@ -2711,7 +2813,7 @@ end))
 
 -- ===== UI SETUP =====
 Window = Compkiller.new({
-    Name = "OP MM2 SCRIPT",
+    Name = "OP MM2 SCRIPT | V1/V2 PREDICTION",
     Keybind = "P",
     Logo = "rbxassetid://120245531583106",
     Scale = Compkiller.Scale.Window,
@@ -2728,14 +2830,13 @@ Watermark:AddText({ Icon = "server", Text = Compkiller.Version })
 task.spawn(function()
     while task.wait(0.5) do
         Time:SetText(Compkiller:GetTimeNow())
-        PingDisplay:SetText(string.format("PING: %dms | VAR: %dms | STD: %.1f | STAB: %.1f%%",
-            NetworkMetrics.ping, NetworkMetrics.variance, NetworkMetrics.standardDeviation, NetworkMetrics.stability * 100))
+        PingDisplay:SetText(string.format("PING: %dms", NetworkMetrics.ping))
     end
 end)
 
 Notifier.new({
     Title = "MM2",
-    Content = "loaded",
+    Content = "LOADED | V1 (Advanced) / V2 (Simple) Prediction - Torso Aim",
     Duration = 8,
     Icon = "rbxassetid://120245531583106"
 })
@@ -2797,14 +2898,52 @@ VisualsGunSection:AddToggle({
     Default = true,
     Callback = function(v) State.gun_highlight = v; highlightDroppedGun() end
 })
-VisualsGunSection:AddToggle({
-    Name = "Gun Drop Line Tracer",
+
+VisualsTracerSection = VisualsTab:DrawSection({ Name = "2D Tracers", Position = 'left' })
+VisualsTracerSection:AddToggle({
+    Name = "Gun Drop Tracer (Purple)",
     Flag = "GunTracer_Enabled",
     Default = true,
-    Callback = function(v) State.gun_tracer = v; updateGunTracer() end
+    Callback = function(v)
+        State.gun_tracer = v
+        if not v and gunTracer then
+            gunTracer.Visible = false
+            gunTracer:Remove()
+            gunTracer = nil
+        end
+        Notifier.new({Title="Gun Tracer", Content=v and "ENABLED" or "DISABLED", Duration=2})
+    end
+})
+VisualsTracerSection:AddToggle({
+    Name = "Sheriff Tracer (Blue)",
+    Flag = "SheriffTracer_Enabled",
+    Default = false,
+    Callback = function(v)
+        State.sheriff_tracer = v
+        if not v and sheriffTracer then
+            sheriffTracer.Visible = false
+            sheriffTracer:Remove()
+            sheriffTracer = nil
+        end
+        Notifier.new({Title="Sheriff Tracer", Content=v and "ENABLED" or "DISABLED", Duration=2})
+    end
+})
+VisualsTracerSection:AddToggle({
+    Name = "Murderer Tracer (Red)",
+    Flag = "MurdererTracer_Enabled",
+    Default = false,
+    Callback = function(v)
+        State.murderer_tracer = v
+        if not v and murdererTracer then
+            murdererTracer.Visible = false
+            murdererTracer:Remove()
+            murdererTracer = nil
+        end
+        Notifier.new({Title="Murderer Tracer", Content=v and "ENABLED" or "DISABLED", Duration=2})
+    end
 })
 
-VisualsCosmetics = VisualsTab:DrawSection({ Name = "Cosmetics", Position = 'left' })
+VisualsCosmetics = VisualsTab:DrawSection({ Name = "Cosmetics", Position = 'right' })
 VisualsCosmetics:AddToggle({
     Name = "Headless",
     Flag = "Headless_Enabled",
@@ -2828,7 +2967,30 @@ VisualsCosmetics:AddToggle({
 
 -- ===== SHERIFF TAB =====
 SheriffTab = Window:DrawTab({ Name = "Sheriff", Icon = "target", EnableScrolling = true })
-SheriffCameraSection = SheriffTab:DrawSection({ Name = "Camera Aimbot", Position = 'left' })
+
+-- Prediction Mode Dropdown (V1 or V2 only)
+SheriffPredictionSection = SheriffTab:DrawSection({ Name = "🎯 PREDICTION SYSTEM", Position = 'left' })
+SheriffPredictionSection:AddDropdown({
+    Name = "Prediction Mode",
+    Flag = "PredictionMode",
+    Default = "V1 (Advanced - Smoothing + Acceleration)",
+    Values = {"V1 (Advanced - Smoothing + Acceleration)", "V2 (Simple - Position + Velocity)"},
+    Callback = function(v)
+        if v == "V2 (Simple - Position + Velocity)" then
+            State.prediction_mode = "V2"
+            Notifier.new({Title="Prediction Mode", Content="V2 (SIMPLE) - Position + Velocity only, minimal prediction", Duration=3})
+        else
+            State.prediction_mode = "V1"
+            Notifier.new({Title="Prediction Mode", Content="V1 (ADVANCED) - Velocity smoothing, acceleration, distance-based timing", Duration=3})
+        end
+    end
+})
+SheriffPredictionSection:AddParagraph({ 
+    title = "V1 vs V2", 
+    text = "V1: Smoothing + Acceleration + Distance-based (better for erratic movement)\nV2: Simple position + velocity (lighter, faster)" 
+})
+
+SheriffCameraSection = SheriffTab:DrawSection({ Name = "Camera Aimbot", Position = 'right' })
 SheriffCameraSection:AddToggle({
     Name = "Enable Aimbot Feature",
     Flag = "Aimbot_Enabled",
@@ -2868,7 +3030,7 @@ SheriffCameraSection:AddKeybind({
     Callback = function(v) State.aimbot_keybind = v end,
 })
 
-SheriffFlickSection = SheriffTab:DrawSection({ Name = "Flick Shoot (TORSO)", Position = 'right' })
+SheriffFlickSection = SheriffTab:DrawSection({ Name = "Flick Shoot", Position = 'left' })
 SheriffFlickSection:AddToggle({
     Name = "Enable Flick Shoot",
     Flag = "FlickShoot_Enabled",
@@ -2888,7 +3050,7 @@ SheriffFlickSection:AddKeybind({
     Callback = function(v) State.flick_keybind = v end,
 })
 
-SheriffSilentSection = SheriffTab:DrawSection({ Name = "Silent Aim", Position = 'left' })
+SheriffSilentSection = SheriffTab:DrawSection({ Name = "Silent Aim", Position = 'right' })
 SheriffSilentSection:AddToggle({
     Name = "Enable Silent Aim",
     Flag = "SilentAim_Enabled",
@@ -2902,7 +3064,7 @@ SheriffSilentSection:AddToggle({
     Callback = function(v) aimOnlyWhenHolding = v end,
 })
 
-SheriffSilentHackerSection = SheriffTab:DrawSection({ Name = "Silent Hacker", Position = 'right' })
+SheriffSilentHackerSection = SheriffTab:DrawSection({ Name = "Silent Hacker", Position = 'left' })
 SheriffSilentHackerSection:AddToggle({
     Name = "Enable Silent Hacker",
     Flag = "SilentHacker_Enabled",
@@ -2924,7 +3086,7 @@ SheriffSilentHackerSection:AddSlider({
     Callback = function(v) State.silent_hacker_distance = v end
 })
 
-SheriffTriggerSection = SheriffTab:DrawSection({ Name = "Triggerbot", Position = 'left' })
+SheriffTriggerSection = SheriffTab:DrawSection({ Name = "Triggerbot", Position = 'right' })
 SheriffTriggerSection:AddToggle({
     Name = "Enable Triggerbot",
     Flag = "Triggerbot_Enabled",
@@ -2935,7 +3097,7 @@ SheriffTriggerSection:AddToggle({
     end,
 })
 
-SheriffGunTPSection = SheriffTab:DrawSection({ Name = "Gun Teleporter", Position = 'right' })
+SheriffGunTPSection = SheriffTab:DrawSection({ Name = "Gun Teleporter", Position = 'left' })
 SheriffGunTPSection:AddButton({ Name = "Teleport to Gun (Snap Back)", Callback = TeleportToGunSnapBack })
 SheriffGunTPSection:AddToggle({ Name = "Enable Auto Teleport to Gun", Flag = "AutoGunTP_Enabled", Default = false, Callback = function(v) State.gun_autotp = v end })
 SheriffGunTPSection:AddParagraph({ title = "Info", text = "Teleports you to dropped gun and snaps back." })
@@ -3257,5 +3419,5 @@ ConfigManager:LoadConfig("AnnieConfig")
 task.spawn(function()
     task.wait(0.75)
     Compkiller:SetTheme("Dark Blue")
-    Notifier.new({ Title = "Theme Applied", Content = "Dark Blue theme loaded!", Duration = 4, Icon = "paint-brush" })
+    Notifier.new({ Title = "Theme Applied", Content = "Dark Blue theme loaded! | V1 (Advanced) / V2 (Simple) Prediction", Duration = 4, Icon = "paint-brush" })
 end)
