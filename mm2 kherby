@@ -419,14 +419,89 @@ getgenv().MM2State = {
     walkspeed_enabled = false, walkspeed_amount = 50,
     speedboost_enabled = false, speedboost_amount = 19,
     infinite_jump = false, noclip_enabled = false, antifling_enabled = false,
-    gun_esp = true, gun_highlight = true, gun_tracer = true, gun_autotp = false,
-    sheriff_tracer = false, murderer_tracer = false,
+    gun_esp = true, gun_highlight = true, gun_autotp = false,
     godmode_enabled = false, godmode_keybind = "G",
     desync_enabled = false, desync_active = false, desync_keybind = "Z",
     autofarm_enabled = false, autofarm_esp = false, autofarm_mode = "DESYNC", autofarm_tween_speed = 0.8,
-    prediction_mode = "V1", -- V1 (Advanced) or V2 (Simple)
+    
+    -- New Aim Settings
+    silent_aim_prediction_x = 1.00,
+    silent_aim_prediction_y = 1.00,
+    silent_aim_hitpart = "Head",
+    
+    aimbot_sensitivity = 1.00,
+    aimbot_hitpart = "Head",
+    aimbot_aim_type = "Mouse",
+    aimbot_smooth_x = 50.0,
+    aimbot_smooth_y = 50.0,
+    aimbot_prediction_x = 1.00,
+    aimbot_prediction_y = 1.00,
 }
 State = getgenv().MM2State
+
+-- ===== TARGET PART SELECTION =====
+local function getTargetPart(character, hitPartName)
+    if not character then return nil end
+    
+    local targetPart = nil
+    if hitPartName == "Head" then
+        targetPart = character:FindFirstChild("Head")
+    elseif hitPartName == "Body" then
+        targetPart = character:FindFirstChild("UpperTorso") or character:FindFirstChild("Torso")
+    elseif hitPartName == "Left Leg" then
+        targetPart = character:FindFirstChild("LeftLowerLeg") or character:FindFirstChild("LeftLeg")
+    elseif hitPartName == "Right Leg" then
+        targetPart = character:FindFirstChild("RightLowerLeg") or character:FindFirstChild("RightLeg")
+    elseif hitPartName == "Left Arm" then
+        targetPart = character:FindFirstChild("LeftUpperArm") or character:FindFirstChild("LeftArm")
+    elseif hitPartName == "Right Arm" then
+        targetPart = character:FindFirstChild("RightUpperArm") or character:FindFirstChild("RightArm")
+    elseif hitPartName == "Closest Part" then
+        local hrp = character:FindFirstChild("HumanoidRootPart")
+        if hrp then
+            local camera = workspace.CurrentCamera
+            local bestPart, bestDist = nil, math.huge
+            local mousePos = UserInputService:GetMouseLocation()
+            for _, part in ipairs(character:GetChildren()) do
+                if part:IsA("BasePart") and part.Name ~= "HumanoidRootPart" then
+                    local screenPos, onScreen = camera:WorldToViewportPoint(part.Position)
+                    if onScreen then
+                        local dist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
+                        if dist < bestDist then
+                            bestDist = dist
+                            bestPart = part
+                        end
+                    end
+                end
+            end
+            targetPart = bestPart or hrp
+        else
+            targetPart = hrp
+        end
+    else
+        targetPart = character:FindFirstChild("Head") or character:FindFirstChild("UpperTorso") or character:FindFirstChild("HumanoidRootPart")
+    end
+    
+    return targetPart
+end
+
+-- ===== PREDICTION WITH X/Y DIVISION =====
+local function getPredictedPosition(part, predictionX, predictionY)
+    if not part then return part and part.Position or Vector3.new() end
+    
+    local velocity = part.AssemblyLinearVelocity or Vector3.new()
+    local predictedPos = part.Position
+    
+    -- Apply X and Z prediction based on X division
+    local xzPrediction = Vector3.new(velocity.X, 0, velocity.Z) * (0.05 * predictionX)
+    predictedPos = predictedPos + xzPrediction
+    
+    -- Apply Y prediction based on Y division
+    local yPrediction = velocity.Y * (0.05 * predictionY)
+    predictedPos = Vector3.new(predictedPos.X, predictedPos.Y + yPrediction, predictedPos.Z)
+    
+    return predictedPos
+end
 
 -- ===== TRADE SYSTEM =====
 Sync = nil
@@ -831,134 +906,7 @@ ToggleFPSBooster = function(enabled)
     end
 end
 
--- ============================================
---  PREDICTION V1 (ADVANCED - With smoothing, acceleration, distance-based)
--- ============================================
-
--- Per-player data storage for V1
-local V1PlayerData = {}
-
-local function getV1PlayerData(player)
-    if not V1PlayerData[player] then
-        V1PlayerData[player] = {
-            lastVelocity = Vector3.zero,
-            lastTime = tick(),
-        }
-    end
-    return V1PlayerData[player]
-end
-
-function predictV1(targetPart, myPosition)
-    if not targetPart then return targetPart and targetPart.Position or Vector3.new() end
-    
-    local player = nil
-    -- Find which player this targetPart belongs to
-    local character = targetPart.Parent
-    if character and character:IsA("Model") then
-        player = Players:GetPlayerFromCharacter(character)
-    end
-    
-    local data = getV1PlayerData(player)
-    local currentTime = tick()
-    local dt = math.min(0.1, currentTime - data.lastTime)
-    data.lastTime = currentTime
-
-    local position = targetPart.Position
-    local currentVelocity = targetPart.AssemblyLinearVelocity or Vector3.zero
-
-    -- 1. Smooth velocity (anti-zigzag)
-    local SMOOTHING = 0.2
-    data.lastVelocity = data.lastVelocity:Lerp(currentVelocity, SMOOTHING)
-
-    -- 2. Calculate acceleration
-    local acceleration = Vector3.zero
-    if dt > 0 then
-        acceleration = (currentVelocity - data.lastVelocity) / dt
-    end
-
-    -- 3. Distance-based prediction timing
-    local distance = myPosition and (myPosition - position).Magnitude or 50
-    local predictionTime
-    
-    if distance < 10 then
-        predictionTime = 0.03 -- close range
-    elseif distance < 25 then
-        predictionTime = 0.05 -- mid range
-    else
-        predictionTime = 0.07 -- far range
-    end
-
-    -- 4. Split movement into horizontal and vertical
-    local horizontalVelocity = Vector3.new(data.lastVelocity.X, 0, data.lastVelocity.Z)
-    local verticalVelocity = data.lastVelocity.Y
-
-    -- 5. Jump handling (reduce vertical effect so we don't overshoot)
-    local verticalAdjustment = 0
-    if math.abs(verticalVelocity) > 2 then
-        verticalAdjustment = verticalVelocity * (predictionTime * 0.3)
-    end
-
-    -- 6. Acceleration influence (clamped to prevent overshoot)
-    local accelFactor = 0.5
-    local accelContribution = acceleration * (predictionTime ^ 2) * accelFactor
-    
-    -- Clamp acceleration contribution
-    if accelContribution.Magnitude > 10 then
-        accelContribution = accelContribution.Unit * 10
-    end
-
-    -- 7. Final predicted position
-    local predictedPosition = position 
-        + (horizontalVelocity * predictionTime) 
-        + Vector3.new(0, verticalAdjustment, 0) 
-        + accelContribution
-
-    -- Keep Y axis at torso level (don't predict too high/low)
-    predictedPosition = Vector3.new(
-        predictedPosition.X,
-        math.clamp(predictedPosition.Y, position.Y - 3, position.Y + 4),
-        predictedPosition.Z
-    )
-
-    return predictedPosition
-end
-
--- Clean up V1 data periodically
-task.spawn(function()
-    while task.wait(60) do
-        for player, _ in pairs(V1PlayerData) do
-            if not player or not player.Parent then
-                V1PlayerData[player] = nil
-            end
-        end
-    end
-end)
-
--- ============================================
---  PREDICTION V2 (SIMPLE - Just position + velocity)
--- ============================================
-function predictV2(targetPart, myPosition)
-    if not targetPart then return targetPart and targetPart.Position or Vector3.new() end
-    
-    local position = targetPart.Position
-    local velocity = targetPart.AssemblyLinearVelocity or Vector3.new()
-    
-    -- Simple prediction with fixed time
-    local predictionTime = 0.05
-    
-    local predictedPos = position + (velocity * predictionTime)
-    
-    -- Keep Y axis reasonable (don't predict too high)
-    predictedPos = Vector3.new(
-        predictedPos.X,
-        math.clamp(predictedPos.Y, position.Y - 3, position.Y + 4),
-        predictedPos.Z
-    )
-    
-    return predictedPos
-end
-
--- ===== NETWORK METRICS (for ping display only) =====
+-- ===== NETWORK METRICS =====
 NetworkMetrics = {
     ping = 0,
     lastUpdate = 0,
@@ -992,21 +940,6 @@ updateNetworkMetrics = function()
         NetworkMetrics.ping = rawPing
     end
     NetworkMetrics.lastUpdate = currentTime
-end
-
--- ===== MAIN PREDICTION FUNCTION =====
-predictPlayerPosition = function(player, targetPart)
-    if not targetPart then return targetPart and targetPart.Position or Vector3.new() end
-    
-    -- Get my position for distance calculation
-    local myChar = LocalPlayer.Character
-    local myPosition = myChar and myChar:FindFirstChild("HumanoidRootPart") and myChar.HumanoidRootPart.Position or Vector3.new()
-    
-    if State.prediction_mode == "V2" then
-        return predictV2(targetPart, myPosition)
-    else
-        return predictV1(targetPart, myPosition)
-    end
 end
 
 -- ===== UTILITY FUNCTIONS =====
@@ -1407,7 +1340,7 @@ RunService:BindToRenderStep("BoxESP", Enum.RenderPriority.Camera.Value, function
     end
 end)
 
--- ===== 2D GUN ESP & TRACERS =====
+-- ===== 2D GUN ESP & TRACERS (NO BEAM - PURE 2D DRAWING) =====
 local gunTracer = nil
 local sheriffTracer = nil
 local murdererTracer = nil
@@ -1844,12 +1777,13 @@ getBestTarget = function()
     for _, plr in ipairs(Players:GetPlayers()) do
         if plr ~= LocalPlayer and isAlive(plr) and plr.Character then
             if State.aimbot_murderer_only and not isMurderer(plr) then continue end
-            
-            -- Target torso for sure hits
-            local targetPart = plr.Character:FindFirstChild("UpperTorso") or plr.Character:FindFirstChild("Torso")
-            if not targetPart then targetPart = plr.Character:FindFirstChild("HumanoidRootPart") end
+            local targetPart = getTargetPart(plr.Character, State.aimbot_hitpart)
             if targetPart then
-                local screenPos, onScreen = camera:WorldToViewportPoint(targetPart.Position)
+                local predictedPos = targetPart.Position
+                if State.aimbot_prediction_x > 1.0 or State.aimbot_prediction_y > 1.0 then
+                    predictedPos = getPredictedPosition(targetPart, State.aimbot_prediction_x, State.aimbot_prediction_y)
+                end
+                local screenPos, onScreen = camera:WorldToViewportPoint(predictedPos)
                 if onScreen then
                     local dist = (Vector2.new(screenPos.X, screenPos.Y) - mousePos).Magnitude
                     if dist < State.aimbot_fov then
@@ -1870,27 +1804,34 @@ updateAimbot = function()
     local targetPlr = getBestTarget()
     if not targetPlr or not targetPlr.Character then return end
     
-    -- Target torso for sure hits
-    local targetPart = targetPlr.Character:FindFirstChild("UpperTorso") or targetPlr.Character:FindFirstChild("Torso")
-    if not targetPart then targetPart = targetPlr.Character:FindFirstChild("HumanoidRootPart") end
+    local targetPart = getTargetPart(targetPlr.Character, State.aimbot_hitpart)
     if not targetPart then return end
     
-    -- Get my position for distance calculation
-    local myChar = LocalPlayer.Character
-    local myPosition = myChar and myChar:FindFirstChild("HumanoidRootPart") and myChar.HumanoidRootPart.Position or Vector3.new()
-    
-    local predictedPos
-    if State.prediction_mode == "V2" then
-        predictedPos = predictV2(targetPart, myPosition)
-    else
-        predictedPos = predictV1(targetPart, myPosition)
+    local predictedPos = targetPart.Position
+    if State.aimbot_prediction_x > 1.0 or State.aimbot_prediction_y > 1.0 then
+        predictedPos = getPredictedPosition(targetPart, State.aimbot_prediction_x, State.aimbot_prediction_y)
     end
     
     local camera = Workspace.CurrentCamera
     local currentCFrame = camera.CFrame
-    local targetCFrame = CFrame.new(currentCFrame.Position, predictedPos)
-    local smooth = isMurderer(targetPlr) and 0.78 or State.aimbot_smooth
-    camera.CFrame = currentCFrame:Lerp(targetCFrame, smooth)
+    local targetCFrame = CFrame.new(camera.CFrame.Position, predictedPos)
+    
+    if State.aimbot_aim_type == "Mouse" then
+        local screenPoint, onScreen = camera:WorldToViewportPoint(predictedPos)
+        if onScreen then
+            local mouseMovement = Vector2.new(screenPoint.X - mouse.X, screenPoint.Y - mouse.Y)
+            local smoothX = 100 / State.aimbot_smooth_x
+            local smoothY = 100 / State.aimbot_smooth_y
+            mousemoverel(mouseMovement.X / smoothX, mouseMovement.Y / smoothY)
+        end
+    else
+        local smooth = isMurderer(targetPlr) and 0.78 or (0.3 + (State.aimbot_sensitivity / 2))
+        local smoothXFactor = State.aimbot_smooth_x / 100
+        local smoothYFactor = State.aimbot_smooth_y / 100
+        local lerpFactor = smooth * smoothXFactor * smoothYFactor
+        camera.CFrame = currentCFrame:Lerp(targetCFrame, math.clamp(lerpFactor, 0.1, 0.9))
+    end
+    
     if targetPlr ~= LastLockedTarget then LastLockedTarget = targetPlr end
 end
 
@@ -1921,22 +1862,11 @@ performFlickShoot = function()
         Notifier.new({Title="Flick Shoot", Content="No gun equipped", Duration=2})
         return
     end
-    
-    -- Target torso
-    local targetPart = targetPlr.Character:FindFirstChild("UpperTorso") or targetPlr.Character:FindFirstChild("Torso")
-    if not targetPart then targetPart = targetPlr.Character:FindFirstChild("HumanoidRootPart") end
+    local targetPart = getTargetPart(targetPlr.Character, "Body")
+    if not targetPart then targetPart = targetPlr.Character:FindFirstChild("Head") end
     if not targetPart then return end
     
-    -- Get my position for distance calculation
-    local myChar = LocalPlayer.Character
-    local myPosition = myChar and myChar:FindFirstChild("HumanoidRootPart") and myChar.HumanoidRootPart.Position or Vector3.new()
-    
-    local targetPos
-    if State.prediction_mode == "V2" then
-        targetPos = predictV2(targetPart, myPosition)
-    else
-        targetPos = predictV1(targetPart, myPosition)
-    end
+    local targetPos = targetPart.Position
     
     local camera = Workspace.CurrentCamera
     local startCFrame = camera.CFrame
@@ -1973,20 +1903,15 @@ getMurdererTargetPosition = function()
     end
     if not targetMurderer or not targetMurderer.Character then return nil end
     
-    -- Target torso
-    local targetPart = targetMurderer.Character:FindFirstChild("UpperTorso") or targetMurderer.Character:FindFirstChild("Torso")
-    if not targetPart then targetPart = targetMurderer.Character:FindFirstChild("HumanoidRootPart") end
+    local targetPart = getTargetPart(targetMurderer.Character, State.silent_aim_hitpart)
     if not targetPart then return nil end
     
-    -- Get my position for distance calculation
-    local myChar = LocalPlayer.Character
-    local myPosition = myChar and myChar:FindFirstChild("HumanoidRootPart") and myChar.HumanoidRootPart.Position or Vector3.new()
-    
-    if State.prediction_mode == "V2" then
-        return predictV2(targetPart, myPosition)
-    else
-        return predictV1(targetPart, myPosition)
+    local predictedPos = targetPart.Position
+    if State.silent_aim_prediction_x > 1.0 or State.silent_aim_prediction_y > 1.0 then
+        predictedPos = getPredictedPosition(targetPart, State.silent_aim_prediction_x, State.silent_aim_prediction_y)
     end
+    
+    return predictedPos
 end
 
 setupSilentAim = function()
@@ -2046,20 +1971,8 @@ performSilentHacker = function()
     if not murderer then return end
     State.silent_hacker_target = murderer
     
-    -- Target torso
-    local targetPart = murderer.Character:FindFirstChild("UpperTorso") or murderer.Character:FindFirstChild("Torso")
-    if not targetPart then targetPart = murderer.Character:FindFirstChild("HumanoidRootPart") end
-    
-    -- Get my position for distance calculation
-    local myChar = LocalPlayer.Character
-    local myPosition = myChar and myChar:FindFirstChild("HumanoidRootPart") and myChar.HumanoidRootPart.Position or Vector3.new()
-    
-    local predictedPos
-    if State.prediction_mode == "V2" then
-        predictedPos = predictV2(targetPart, myPosition)
-    else
-        predictedPos = predictV1(targetPart, myPosition)
-    end
+    local targetPart = getTargetPart(murderer.Character, "Body")
+    local predictedPos = targetPart and targetPart.Position or Vector3.new()
     if not predictedPos then return end
     
     State.silent_hacker_active = true
@@ -2077,13 +1990,8 @@ performSilentHacker = function()
             if not murderer or not isAlive(murderer) then stopSilentHacker() return end
             State.silent_hacker_target = murderer
             
-            local newTargetPart = murderer.Character:FindFirstChild("UpperTorso") or murderer.Character:FindFirstChild("Torso")
-            local newPredictedPos
-            if State.prediction_mode == "V2" then
-                newPredictedPos = predictV2(newTargetPart, myPosition)
-            else
-                newPredictedPos = predictV1(newTargetPart, myPosition)
-            end
+            local newTargetPart = getTargetPart(murderer.Character, "Body")
+            local newPredictedPos = newTargetPart and newTargetPart.Position or Vector3.new()
             if not newPredictedPos then task.wait(0.016) continue end
             predictedPos = newPredictedPos
             
@@ -2813,7 +2721,7 @@ end))
 
 -- ===== UI SETUP =====
 Window = Compkiller.new({
-    Name = "OP MM2 SCRIPT | V1/V2 PREDICTION",
+    Name = "OP MM2 SCRIPT",
     Keybind = "P",
     Logo = "rbxassetid://120245531583106",
     Scale = Compkiller.Scale.Window,
@@ -2836,7 +2744,7 @@ end)
 
 Notifier.new({
     Title = "MM2",
-    Content = "LOADED | V1 (Advanced) / V2 (Simple) Prediction - Torso Aim",
+    Content = "LOADED | 2D Tracers - Purple (Gun), Blue (Sheriff), Red (Murderer)",
     Duration = 8,
     Icon = "rbxassetid://120245531583106"
 })
@@ -2968,30 +2876,41 @@ VisualsCosmetics:AddToggle({
 -- ===== SHERIFF TAB =====
 SheriffTab = Window:DrawTab({ Name = "Sheriff", Icon = "target", EnableScrolling = true })
 
--- Prediction Mode Dropdown (V1 or V2 only)
-SheriffPredictionSection = SheriffTab:DrawSection({ Name = "🎯 PREDICTION SYSTEM", Position = 'left' })
-SheriffPredictionSection:AddDropdown({
-    Name = "Prediction Mode",
-    Flag = "PredictionMode",
-    Default = "V1 (Advanced - Smoothing + Acceleration)",
-    Values = {"V1 (Advanced - Smoothing + Acceleration)", "V2 (Simple - Position + Velocity)"},
-    Callback = function(v)
-        if v == "V2 (Simple - Position + Velocity)" then
-            State.prediction_mode = "V2"
-            Notifier.new({Title="Prediction Mode", Content="V2 (SIMPLE) - Position + Velocity only, minimal prediction", Duration=3})
-        else
-            State.prediction_mode = "V1"
-            Notifier.new({Title="Prediction Mode", Content="V1 (ADVANCED) - Velocity smoothing, acceleration, distance-based timing", Duration=3})
-        end
-    end
+-- Silent Aim Section
+SheriffSilentAimSection = SheriffTab:DrawSection({ Name = "Silent Aim Settings", Position = 'left' })
+SheriffSilentAimSection:AddToggle({
+    Name = "Enable Silent Aim",
+    Flag = "SilentAim_Enabled",
+    Default = false,
+    Callback = function(v) silentAimEnabled = v; Notifier.new({Title="Silent Aim", Content=v and "ENABLED" or "DISABLED", Duration=2}) end,
 })
-SheriffPredictionSection:AddParagraph({ 
-    title = "V1 vs V2", 
-    text = "V1: Smoothing + Acceleration + Distance-based (better for erratic movement)\nV2: Simple position + velocity (lighter, faster)" 
+SheriffSilentAimSection:AddToggle({
+    Name = "Activate Only While Holding Shift",
+    Flag = "AimOnlyHolding",
+    Default = false,
+    Callback = function(v) aimOnlyWhenHolding = v end,
+})
+SheriffSilentAimSection:AddDropdown({
+    Name = "Target Hit Part",
+    Default = "Head",
+    Flag = "SilentAim_HitPart",
+    Values = {"Head", "Body", "Left Leg", "Right Leg", "Left Arm", "Right Arm", "Closest Part"},
+    Callback = function(v) State.silent_aim_hitpart = v end
+})
+SheriffSilentAimSection:AddSlider({
+    Name = "Prediction X Division",
+    Min = 1.00, Max = 20.00, Default = 1.00, Round = 2, Flag = "SilentAim_PredictionX",
+    Callback = function(v) State.silent_aim_prediction_x = v end
+})
+SheriffSilentAimSection:AddSlider({
+    Name = "Prediction Y Division",
+    Min = 1.00, Max = 20.00, Default = 1.00, Round = 2, Flag = "SilentAim_PredictionY",
+    Callback = function(v) State.silent_aim_prediction_y = v end
 })
 
-SheriffCameraSection = SheriffTab:DrawSection({ Name = "Camera Aimbot", Position = 'right' })
-SheriffCameraSection:AddToggle({
+-- Aimbot Section
+SheriffAimbotSection = SheriffTab:DrawSection({ Name = "Aimbot Settings", Position = 'right' })
+SheriffAimbotSection:AddToggle({
     Name = "Enable Aimbot Feature",
     Flag = "Aimbot_Enabled",
     Default = false,
@@ -3001,35 +2920,70 @@ SheriffCameraSection:AddToggle({
         Notifier.new({Title="Aimbot", Content=v and "Enabled" or "Disabled", Duration=2})
     end,
 })
-SheriffCameraSection:AddToggle({
+SheriffAimbotSection:AddToggle({
     Name = "Enable Sticky Aimlock",
     Flag = "Aimbot_Sticky",
     Default = false,
     Callback = function(v) State.aimbot_sticky = v; if not v then LockedTarget = nil end end
 })
-SheriffCameraSection:AddSlider({
-    Name = "Smoothness",
-    Min = 0.1, Max = 0.9, Default = 0.45, Round = 2, Flag = "Aimbot_Smooth",
-    Callback = function(v) State.aimbot_smooth = v end
+SheriffAimbotSection:AddSlider({
+    Name = "Sensitivity",
+    Min = 0.10, Max = 2.00, Default = 1.00, Round = 2, Flag = "Aimbot_Sensitivity",
+    Callback = function(v) State.aimbot_sensitivity = v end
 })
-SheriffCameraSection:AddSlider({
+SheriffAimbotSection:AddSlider({
     Name = "Field of View",
     Min = 80, Max = 400, Default = 220, Round = 0, Flag = "Aimbot_FOV",
     Callback = function(v) State.aimbot_fov = v end
 })
-SheriffCameraSection:AddToggle({
+SheriffAimbotSection:AddToggle({
     Name = "Target Murderer Only",
     Flag = "Aimbot_MurdererOnly",
     Default = false,
     Callback = function(v) State.aimbot_murderer_only = v end
 })
-SheriffCameraSection:AddKeybind({
+SheriffAimbotSection:AddDropdown({
+    Name = "Target Hit Part",
+    Default = "Head",
+    Flag = "Aimbot_HitPart",
+    Values = {"Head", "Body", "Left Leg", "Right Leg", "Left Arm", "Right Arm", "Closest Part"},
+    Callback = function(v) State.aimbot_hitpart = v end
+})
+SheriffAimbotSection:AddDropdown({
+    Name = "Aim Type",
+    Default = "Mouse",
+    Flag = "Aimbot_AimType",
+    Values = {"Mouse", "Memory"},
+    Callback = function(v) State.aimbot_aim_type = v end
+})
+SheriffAimbotSection:AddSlider({
+    Name = "Prediction X Division",
+    Min = 1.00, Max = 20.00, Default = 1.00, Round = 2, Flag = "Aimbot_PredictionX",
+    Callback = function(v) State.aimbot_prediction_x = v end
+})
+SheriffAimbotSection:AddSlider({
+    Name = "Prediction Y Division",
+    Min = 1.00, Max = 20.00, Default = 1.00, Round = 2, Flag = "Aimbot_PredictionY",
+    Callback = function(v) State.aimbot_prediction_y = v end
+})
+SheriffAimbotSection:AddSlider({
+    Name = "Smoothness X",
+    Min = 1.0, Max = 100.0, Default = 50.0, Round = 1, Flag = "Aimbot_SmoothX",
+    Callback = function(v) State.aimbot_smooth_x = v end
+})
+SheriffAimbotSection:AddSlider({
+    Name = "Smoothness Y",
+    Min = 1.0, Max = 100.0, Default = 50.0, Round = 1, Flag = "Aimbot_SmoothY",
+    Callback = function(v) State.aimbot_smooth_y = v end
+})
+SheriffAimbotSection:AddKeybind({
     Name = "Aimbot Toggle Keybind",
     Default = "Q",
     Flag = "Aimbot_Keybind",
     Callback = function(v) State.aimbot_keybind = v end,
 })
 
+-- Flick Shoot Section
 SheriffFlickSection = SheriffTab:DrawSection({ Name = "Flick Shoot", Position = 'left' })
 SheriffFlickSection:AddToggle({
     Name = "Enable Flick Shoot",
@@ -3050,21 +3004,8 @@ SheriffFlickSection:AddKeybind({
     Callback = function(v) State.flick_keybind = v end,
 })
 
-SheriffSilentSection = SheriffTab:DrawSection({ Name = "Silent Aim", Position = 'right' })
-SheriffSilentSection:AddToggle({
-    Name = "Enable Silent Aim",
-    Flag = "SilentAim_Enabled",
-    Default = false,
-    Callback = function(v) silentAimEnabled = v; Notifier.new({Title="Silent Aim", Content=v and "Enabled" or "Disabled", Duration=2}) end,
-})
-SheriffSilentSection:AddToggle({
-    Name = "Activate Only While Holding Shift",
-    Flag = "AimOnlyHolding",
-    Default = false,
-    Callback = function(v) aimOnlyWhenHolding = v end,
-})
-
-SheriffSilentHackerSection = SheriffTab:DrawSection({ Name = "Silent Hacker", Position = 'left' })
+-- Silent Hacker Section
+SheriffSilentHackerSection = SheriffTab:DrawSection({ Name = "Silent Hacker", Position = 'right' })
 SheriffSilentHackerSection:AddToggle({
     Name = "Enable Silent Hacker",
     Flag = "SilentHacker_Enabled",
@@ -3086,7 +3027,8 @@ SheriffSilentHackerSection:AddSlider({
     Callback = function(v) State.silent_hacker_distance = v end
 })
 
-SheriffTriggerSection = SheriffTab:DrawSection({ Name = "Triggerbot", Position = 'right' })
+-- Triggerbot Section
+SheriffTriggerSection = SheriffTab:DrawSection({ Name = "Triggerbot", Position = 'left' })
 SheriffTriggerSection:AddToggle({
     Name = "Enable Triggerbot",
     Flag = "Triggerbot_Enabled",
@@ -3097,7 +3039,8 @@ SheriffTriggerSection:AddToggle({
     end,
 })
 
-SheriffGunTPSection = SheriffTab:DrawSection({ Name = "Gun Teleporter", Position = 'left' })
+-- Gun Teleporter Section
+SheriffGunTPSection = SheriffTab:DrawSection({ Name = "Gun Teleporter", Position = 'right' })
 SheriffGunTPSection:AddButton({ Name = "Teleport to Gun (Snap Back)", Callback = TeleportToGunSnapBack })
 SheriffGunTPSection:AddToggle({ Name = "Enable Auto Teleport to Gun", Flag = "AutoGunTP_Enabled", Default = false, Callback = function(v) State.gun_autotp = v end })
 SheriffGunTPSection:AddParagraph({ title = "Info", text = "Teleports you to dropped gun and snaps back." })
@@ -3419,5 +3362,5 @@ ConfigManager:LoadConfig("AnnieConfig")
 task.spawn(function()
     task.wait(0.75)
     Compkiller:SetTheme("Dark Blue")
-    Notifier.new({ Title = "Theme Applied", Content = "Dark Blue theme loaded! | V1 (Advanced) / V2 (Simple) Prediction", Duration = 4, Icon = "paint-brush" })
+    Notifier.new({ Title = "Theme Applied", Content = "Dark Blue theme loaded! | 2D Tracers", Duration = 4, Icon = "paint-brush" })
 end)
