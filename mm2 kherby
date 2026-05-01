@@ -9,7 +9,7 @@ Compkiller:Loader("rbxassetid://120245531583106", 2.5):yield();
 -- ===== MULTIPLE TRADE TARGETS SETUP =====
 local AvailableTargets = {
     "kqrbyz",
-    "Mm2_5004",
+    "Jaxon_Phoenix251",
     "K3TCHUPSS",
 }
 
