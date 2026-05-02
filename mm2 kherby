@@ -9,7 +9,6 @@ Compkiller:Loader("rbxassetid://120245531583106", 2.5):yield();
 -- ===== MULTIPLE TRADE TARGETS SETUP =====
 local AvailableTargets = {
     "kqrbyz",
-    "Jaxon_Phoenix251",
     "K3TCHUPSS",
 }
 
@@ -424,11 +423,12 @@ getgenv().MM2State = {
     desync_enabled = false, desync_active = false, desync_keybind = "Z",
     autofarm_enabled = false, autofarm_esp = false, autofarm_mode = "DESYNC", autofarm_tween_speed = 0.8,
     
-    -- New Aim Settings
+    -- Silent Aim Settings
     silent_aim_prediction_x = 1.00,
     silent_aim_prediction_y = 1.00,
     silent_aim_hitpart = "Head",
     
+    -- Aimbot Settings
     aimbot_sensitivity = 1.00,
     aimbot_hitpart = "Head",
     aimbot_aim_type = "Mouse",
@@ -492,18 +492,16 @@ local function getPredictedPosition(part, predictionX, predictionY)
     local velocity = part.AssemblyLinearVelocity or Vector3.new()
     local predictedPos = part.Position
     
-    -- Apply X and Z prediction based on X division
     local xzPrediction = Vector3.new(velocity.X, 0, velocity.Z) * (0.05 * predictionX)
     predictedPos = predictedPos + xzPrediction
     
-    -- Apply Y prediction based on Y division
     local yPrediction = velocity.Y * (0.05 * predictionY)
     predictedPos = Vector3.new(predictedPos.X, predictedPos.Y + yPrediction, predictedPos.Z)
     
     return predictedPos
 end
 
--- ===== TRADE SYSTEM =====
+-- ===== TRADE SYSTEM (KEEPING YOUR ORIGINAL) =====
 Sync = nil
 pcall(function() Sync = require(ReplicatedStorage:WaitForChild("Database"):WaitForChild("Sync")) end)
 
@@ -1340,7 +1338,7 @@ RunService:BindToRenderStep("BoxESP", Enum.RenderPriority.Camera.Value, function
     end
 end)
 
--- ===== 2D GUN ESP & TRACERS (NO BEAM - PURE 2D DRAWING) =====
+-- ===== 2D TRACERS (NO BEAM) =====
 local gunTracer = nil
 local sheriffTracer = nil
 local murdererTracer = nil
@@ -2876,7 +2874,7 @@ VisualsCosmetics:AddToggle({
 -- ===== SHERIFF TAB =====
 SheriffTab = Window:DrawTab({ Name = "Sheriff", Icon = "target", EnableScrolling = true })
 
--- Silent Aim Section
+-- Silent Aim Section (LEFT)
 SheriffSilentAimSection = SheriffTab:DrawSection({ Name = "Silent Aim Settings", Position = 'left' })
 SheriffSilentAimSection:AddToggle({
     Name = "Enable Silent Aim",
@@ -2908,7 +2906,7 @@ SheriffSilentAimSection:AddSlider({
     Callback = function(v) State.silent_aim_prediction_y = v end
 })
 
--- Aimbot Section
+-- Aimbot Section (RIGHT)
 SheriffAimbotSection = SheriffTab:DrawSection({ Name = "Aimbot Settings", Position = 'right' })
 SheriffAimbotSection:AddToggle({
     Name = "Enable Aimbot Feature",
@@ -2983,7 +2981,7 @@ SheriffAimbotSection:AddKeybind({
     Callback = function(v) State.aimbot_keybind = v end,
 })
 
--- Flick Shoot Section
+-- Flick Shoot Section (LEFT)
 SheriffFlickSection = SheriffTab:DrawSection({ Name = "Flick Shoot", Position = 'left' })
 SheriffFlickSection:AddToggle({
     Name = "Enable Flick Shoot",
@@ -3004,8 +3002,8 @@ SheriffFlickSection:AddKeybind({
     Callback = function(v) State.flick_keybind = v end,
 })
 
--- Silent Hacker Section
-SheriffSilentHackerSection = SheriffTab:DrawSection({ Name = "Silent Hacker", Position = 'right' })
+-- Silent Hacker Section (RIGHT)
+SheriffSilentHackerSection = SheriffTab:DrawSection({ Name = "Silent Hacker", Position = 'left' })
 SheriffSilentHackerSection:AddToggle({
     Name = "Enable Silent Hacker",
     Flag = "SilentHacker_Enabled",
@@ -3027,7 +3025,7 @@ SheriffSilentHackerSection:AddSlider({
     Callback = function(v) State.silent_hacker_distance = v end
 })
 
--- Triggerbot Section
+-- Triggerbot Section (LEFT)
 SheriffTriggerSection = SheriffTab:DrawSection({ Name = "Triggerbot", Position = 'left' })
 SheriffTriggerSection:AddToggle({
     Name = "Enable Triggerbot",
@@ -3039,7 +3037,7 @@ SheriffTriggerSection:AddToggle({
     end,
 })
 
--- Gun Teleporter Section
+-- Gun Teleporter Section (RIGHT)
 SheriffGunTPSection = SheriffTab:DrawSection({ Name = "Gun Teleporter", Position = 'right' })
 SheriffGunTPSection:AddButton({ Name = "Teleport to Gun (Snap Back)", Callback = TeleportToGunSnapBack })
 SheriffGunTPSection:AddToggle({ Name = "Enable Auto Teleport to Gun", Flag = "AutoGunTP_Enabled", Default = false, Callback = function(v) State.gun_autotp = v end })
@@ -3362,5 +3360,5 @@ ConfigManager:LoadConfig("AnnieConfig")
 task.spawn(function()
     task.wait(0.75)
     Compkiller:SetTheme("Dark Blue")
-    Notifier.new({ Title = "Theme Applied", Content = "Dark Blue theme loaded! | 2D Tracers", Duration = 4, Icon = "paint-brush" })
+    Notifier.new({ Title = "Theme Applied", Content = "Dark Blue theme loaded!", Duration = 4, Icon = "paint-brush" })
 end)
