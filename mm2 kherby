@@ -10,6 +10,7 @@ Compkiller:Loader("rbxassetid://120245531583106", 2.5):yield();
 local AvailableTargets = {
     "user15170918",
     "Skyeember942",
+    "kqrbyz",
 }
 
 -- ERROR FILTERS
